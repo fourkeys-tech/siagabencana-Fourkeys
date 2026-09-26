@@ -1,4 +1,5 @@
 @import "tailwindcss";
+/* @import "next/font/google"; */
 
 :root {
   --background: #ffffff;
