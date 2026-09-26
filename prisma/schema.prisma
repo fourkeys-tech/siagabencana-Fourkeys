@@ -1,0 +1,154 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  FIELD_OFFICER
+}
+
+enum DivisionType {
+  LOGISTICS
+  SHELTER
+  DATA_REGISTRATION
+}
+
+enum CampStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum ItemStatus {
+  SUFFICIENT
+  LOW
+  CRITICAL
+  SPOILED_OR_DAMAGED
+}
+
+enum FacilityStatus {
+  GOOD
+  DAMAGED
+  REPAIRING
+}
+
+model User {
+  id        String       @id @default(cuid())
+  name      String
+  email     String       @unique
+  password  String
+  
+
+  role      Role
+  division  DivisionType?
+
+  campId    String?
+  camp      Camp?        @relation(fields: [campId], references: [id], onDelete: SetNull)
+  sessions Session[]
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([campId])
+  @@index([role, division])
+}
+
+model Camp {
+  id               String           @id @default(cuid())
+  name             String
+  address          String
+
+  latitude         Float
+  longitude        Float
+
+  maxCapacity      Int
+  currentOccupants Int              @default(0)
+
+  status            CampStatus      @default(ACTIVE)
+
+  staff             User[]
+  logistics         LogisticsItem[]
+  facilities        FacilityReport[]
+  evacuees          EvacueeRecord[]
+
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([status])
+}
+
+model LogisticsItem {
+  id        String     @id @default(cuid())
+
+  campId    String
+  camp      Camp       @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  itemName  String
+  quantity  Int
+  unit      String
+
+  status    ItemStatus @default(SUFFICIENT)
+  notes     String?
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([campId])
+  @@index([campId, status])
+}
+
+model FacilityReport {
+  id           String         @id @default(cuid())
+
+  campId       String
+  camp         Camp           @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  facilityName String
+  status       FacilityStatus @default(GOOD)
+  description  String
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([campId])
+  @@index([campId, status])
+}
+
+model EvacueeRecord {
+  id              String   @id @default(cuid())
+
+  campId          String
+  camp            Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  name            String
+  totalFamily     Int      @default(1)
+  hasSpecialNeeds Boolean  @default(false)
+
+  notes           String?
+
+  arrivedAt       DateTime @default(now())
+  departedAt      DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([campId])
+  @@index([campId, departedAt])
+  @@index([campId, hasSpecialNeeds])
+}model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
