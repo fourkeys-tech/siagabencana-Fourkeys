@@ -58,7 +58,9 @@ export async function getCurrentUser() {
         include: {
             user: {
                 include: {
-                    camp: true,
+                    camp: { include: { divisionHeads: { include: { user: { select: { id: true, name: true, division: true } } } } } },
+                    managedCamp: { select: { id: true, name: true } },
+                    divisionHeadAssignments: { include: { camp: { select: { id: true, name: true } } } },
                 },
             },
         },

@@ -23,7 +23,9 @@ export async function GET() {
             role: user.role,
             division: user.division,
             campId: user.campId,
-            camp: user.camp,
+            camp: user.camp ? { id: user.camp.id, name: user.camp.name } : null,
+            managedCamp: user.managedCamp,
+            divisionHeadAssignments: user.divisionHeadAssignments.map((assignment) => ({ campId: assignment.campId, division: assignment.division, camp: assignment.camp })),
         },
     });
 }

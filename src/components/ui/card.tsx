@@ -1,0 +1,3 @@
+export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>{children}</div>; }
+export function CardLabel({ children }: { children: React.ReactNode }) { return <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{children}</p>; }
+export function CardValue({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <p className={`mt-2 text-2xl font-bold tracking-tight text-slate-950 ${className}`}>{children}</p>; }

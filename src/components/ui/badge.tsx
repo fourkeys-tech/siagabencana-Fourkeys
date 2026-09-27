@@ -1,27 +1,7 @@
 const badgeStyles: Record<string, string> = {
-	SUFFICIENT: "bg-green-100 text-green-800",
-	LOW: "bg-yellow-100 text-yellow-800",
-	CRITICAL: "bg-red-100 text-red-800",
-	SPOILED_OR_DAMAGED: "bg-red-200 text-red-900",
-	GOOD: "bg-green-100 text-green-800",
-	DAMAGED: "bg-red-100 text-red-800",
-	REPAIRING: "bg-yellow-100 text-yellow-800",
-	ACTIVE: "bg-green-100 text-green-800",
-	CLOSED: "bg-gray-100 text-gray-800",
-	SUPER_ADMIN: "bg-purple-100 text-purple-800",
-	MANAGER: "bg-blue-100 text-blue-800",
-	FIELD_OFFICER: "bg-gray-100 text-gray-800",
-	LOGISTICS: "bg-blue-100 text-blue-800",
-	SHELTER: "bg-yellow-100 text-yellow-800",
-	DATA_REGISTRATION: "bg-green-100 text-green-800",
+	SUFFICIENT: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", LOW: "bg-amber-50 text-amber-700 ring-amber-600/20", CRITICAL: "bg-rose-50 text-rose-700 ring-rose-600/20", SPOILED_OR_DAMAGED: "bg-rose-50 text-rose-700 ring-rose-600/20", GOOD: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", DAMAGED: "bg-rose-50 text-rose-700 ring-rose-600/20", REPAIRING: "bg-amber-50 text-amber-700 ring-amber-600/20", ACTIVE: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", CLOSED: "bg-slate-100 text-slate-600 ring-slate-500/20", SUPER_ADMIN: "bg-violet-50 text-violet-700 ring-violet-600/20", MANAGER: "bg-blue-50 text-blue-700 ring-blue-600/20", DIVISION_HEAD: "bg-indigo-50 text-indigo-700 ring-indigo-600/20", FIELD_OFFICER: "bg-slate-100 text-slate-600 ring-slate-500/20", LOGISTICS: "bg-blue-50 text-blue-700 ring-blue-600/20", SHELTER: "bg-amber-50 text-amber-700 ring-amber-600/20", DATA_REGISTRATION: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", PENDING: "bg-amber-50 text-amber-700 ring-amber-600/20", APPROVED: "bg-blue-50 text-blue-700 ring-blue-600/20", REJECTED: "bg-rose-50 text-rose-700 ring-rose-600/20", SHIPPED: "bg-violet-50 text-violet-700 ring-violet-600/20", RECEIVED: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
 };
 
 export function Badge({ label }: { label: string }) {
-	return (
-		<span
-			className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${badgeStyles[label] ?? "bg-gray-100 text-gray-800"}`}
-		>
-			{label}
-		</span>
-	);
+	return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${badgeStyles[label] ?? "bg-slate-100 text-slate-600 ring-slate-500/20"}`}>{label.replaceAll("_", " ")}</span>;
 }

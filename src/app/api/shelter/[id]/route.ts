@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 type Params = {
     params: Promise<{ id: string }>;
@@ -25,10 +25,7 @@ export async function GET(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            user.campId !== report.campId
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "SHELTER", report.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -40,6 +37,10 @@ export async function GET(
             data: report,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_SHELTER_ITEM_ERROR", error);
 
         return NextResponse.json(
@@ -68,11 +69,7 @@ export async function PUT(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== report.campId ||
-                user.division !== "SHELTER")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "SHELTER", report.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -102,6 +99,10 @@ export async function PUT(
             data: updated,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("UPDATE_SHELTER_ERROR", error);
 
         return NextResponse.json(
@@ -130,11 +131,7 @@ export async function DELETE(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== report.campId ||
-                user.division !== "SHELTER")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "SHELTER", report.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -150,6 +147,10 @@ export async function DELETE(
             message: "Laporan shelter berhasil dihapus.",
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("DELETE_SHELTER_ERROR", error);
 
         return NextResponse.json(

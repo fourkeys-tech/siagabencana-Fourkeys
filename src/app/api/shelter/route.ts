@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 export async function GET() {
     try {
         const user = await requireAuth();
+        if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "SHELTER", user.campId))) {
+            return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi shelter posko ini." }, { status: 403 });
+        }
 
         const reports = await prisma.facilityReport.findMany({
             where:
@@ -27,6 +30,10 @@ export async function GET() {
             data: reports,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_SHELTER_ERROR", error);
 
         return NextResponse.json(
@@ -42,7 +49,7 @@ export async function POST(request: Request) {
 
         if (
             user.role !== "SUPER_ADMIN" &&
-            (user.division !== "SHELTER" || !user.campId)
+            (!user.campId || !canManageDivision(user, "SHELTER", user.campId))
         ) {
             return NextResponse.json(
                 { success: false, message: "Tidak memiliki akses shelter." },
@@ -96,6 +103,10 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("CREATE_SHELTER_ERROR", error);
 
         return NextResponse.json(

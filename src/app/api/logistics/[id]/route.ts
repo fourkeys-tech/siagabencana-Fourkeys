@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 type Params = {
     params: Promise<{ id: string }>;
@@ -29,10 +29,7 @@ export async function GET(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            user.campId !== item.campId
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "LOGISTICS", item.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -44,6 +41,10 @@ export async function GET(
             data: item,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_LOGISTICS_ITEM_ERROR", error);
 
         return NextResponse.json(
@@ -70,11 +71,7 @@ export async function PUT(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== item.campId ||
-                user.division !== "LOGISTICS")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "LOGISTICS", item.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -82,27 +79,21 @@ export async function PUT(
         }
 
         const body = await request.json();
+        const forbiddenFields = ["quantity", "status", "reservedQuantity", "damagedQuantity"];
+        if (forbiddenFields.some((field) => body[field] !== undefined)) {
+            return NextResponse.json(
+                { success: false, message: "Saldo stok dan status hanya dapat diubah melalui inventory movement." },
+                { status: 400 },
+            );
+        }
 
         const updated = await prisma.logisticsItem.update({
             where: { id },
             data: {
-                ...(body.itemName !== undefined && {
-                    itemName: String(body.itemName).trim(),
-                }),
-                ...(body.quantity !== undefined && {
-                    quantity: Number(body.quantity),
-                }),
-                ...(body.unit !== undefined && {
-                    unit: String(body.unit).trim(),
-                }),
-                ...(body.status !== undefined && {
-                    status: body.status,
-                }),
-                ...(body.notes !== undefined && {
-                    notes: body.notes
-                        ? String(body.notes).trim()
-                        : null,
-                }),
+                ...(body.itemName !== undefined && { itemName: String(body.itemName).trim() }),
+                ...(body.unit !== undefined && { unit: String(body.unit).trim() }),
+                ...(body.minimumQuantity !== undefined && { minimumQuantity: Number(body.minimumQuantity) }),
+                ...(body.notes !== undefined && { notes: body.notes ? String(body.notes).trim() : null }),
             },
         });
 
@@ -112,6 +103,22 @@ export async function PUT(
             data: updated,
         });
     } catch (error) {
+        if (error instanceof Error && error.message === "INVALID_QUANTITY") {
+            return NextResponse.json({ success: false, message: "Jumlah harus bilangan bulat lebih dari 0." }, { status: 400 });
+        }
+        if (error instanceof Error && error.message === "MOVEMENT_REASON_REQUIRED") {
+            return NextResponse.json({ success: false, message: "Alasan wajib diisi." }, { status: 400 });
+        }
+        if (error instanceof Error && error.message === "INSUFFICIENT_AVAILABLE_STOCK") {
+            return NextResponse.json({ success: false, message: "Stok tersedia tidak mencukupi." }, { status: 409 });
+        }
+        if (error instanceof Error && error.message === "LOGISTICS_ITEM_NOT_FOUND") {
+            return NextResponse.json({ success: false, message: "Data logistik tidak ditemukan." }, { status: 404 });
+        }
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("UPDATE_LOGISTICS_ERROR", error);
 
         return NextResponse.json(
@@ -138,11 +145,7 @@ export async function DELETE(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== item.campId ||
-                user.division !== "LOGISTICS")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "LOGISTICS", item.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -158,6 +161,10 @@ export async function DELETE(
             message: "Data logistik berhasil dihapus.",
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("DELETE_LOGISTICS_ERROR", error);
 
         return NextResponse.json(

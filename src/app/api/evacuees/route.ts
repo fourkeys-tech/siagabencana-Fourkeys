@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 export async function GET() {
     try {
         const user = await requireAuth();
+        if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "DATA_REGISTRATION", user.campId))) {
+            return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi registrasi posko ini." }, { status: 403 });
+        }
 
         const evacuees = await prisma.evacueeRecord.findMany({
             where:
@@ -27,6 +30,10 @@ export async function GET() {
             data: evacuees,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_EVACUEES_ERROR", error);
 
         return NextResponse.json(
@@ -42,7 +49,7 @@ export async function POST(request: Request) {
 
         if (
             user.role !== "SUPER_ADMIN" &&
-            (user.division !== "DATA_REGISTRATION" || !user.campId)
+            (!user.campId || !canManageDivision(user, "DATA_REGISTRATION", user.campId))
         ) {
             return NextResponse.json(
                 {
@@ -124,6 +131,10 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         if (error instanceof Error) {
             if (error.message === "CAMP_NOT_FOUND") {
                 return NextResponse.json(

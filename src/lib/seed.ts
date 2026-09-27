@@ -80,71 +80,69 @@ async function main() {
         },
     });
 
-    // =========================
-    // MANAGERS
-    // =========================
-
-    await prisma.user.createMany({
-        data: [
-            {
-                name: "Manager Logistik Candi",
-                email: "manager.logistik.candi@siagabencana.local",
-                password: passwordHash,
-                role: "MANAGER",
-                division: "LOGISTICS",
-                campId: camp1.id,
-            },
-            {
-                name: "Manager Shelter Candi",
-                email: "manager.shelter.candi@siagabencana.local",
-                password: passwordHash,
-                role: "MANAGER",
-                division: "SHELTER",
-                campId: camp1.id,
-            },
-            {
-                name: "Manager Data Candi",
-                email: "manager.data.candi@siagabencana.local",
-                password: passwordHash,
-                role: "MANAGER",
-                division: "DATA_REGISTRATION",
-                campId: camp1.id,
-            },
-        ],
+    await prisma.user.create({
+        data: {
+            name: "Manager Candi",
+            email: "manager.candi@siagabencana.local",
+            password: passwordHash,
+            role: "MANAGER",
+            campId: camp1.id,
+            managedCamp: { connect: { id: camp1.id } },
+        },
     });
+
+    const divisionHeads = [
+        { name: "Head Logistik Candi", email: "head.logistik.candi@siagabencana.local", division: "LOGISTICS" as const },
+        { name: "Head Shelter Candi", email: "head.shelter.candi@siagabencana.local", division: "SHELTER" as const },
+        { name: "Head Data Candi", email: "head.data.candi@siagabencana.local", division: "DATA_REGISTRATION" as const },
+    ];
+
+    for (const head of divisionHeads) {
+        await prisma.user.create({
+            data: {
+                name: head.name,
+                email: head.email,
+                password: passwordHash,
+                role: "DIVISION_HEAD",
+                division: head.division,
+                campId: camp1.id,
+                divisionHeadAssignments: { create: { campId: camp1.id, division: head.division } },
+            },
+        });
+    }
 
     // =========================
     // FIELD OFFICERS
     // =========================
 
-    await prisma.user.createMany({
-        data: [
-            {
-                name: "Field Officer Logistik Candi",
-                email: "field.logistik.candi@siagabencana.local",
-                password: passwordHash,
-                role: "FIELD_OFFICER",
-                division: "LOGISTICS",
-                campId: camp1.id,
-            },
-            {
-                name: "Field Officer Shelter Candi",
-                email: "field.shelter.candi@siagabencana.local",
-                password: passwordHash,
-                role: "FIELD_OFFICER",
-                division: "SHELTER",
-                campId: camp1.id,
-            },
-            {
-                name: "Field Officer Data Candi",
-                email: "field.data.candi@siagabencana.local",
-                password: passwordHash,
-                role: "FIELD_OFFICER",
-                division: "DATA_REGISTRATION",
-                campId: camp1.id,
-            },
-        ],
+    await prisma.user.create({
+        data: {
+            name: "Manager Candi",
+            email: "manager.candi@siagabencana.local",
+            password: passwordHash,
+            role: "MANAGER",
+            campId: camp1.id,
+            managedCamp: { connect: { id: camp1.id } },
+        },
     });
+
+    for (const head of [
+        { name: "Head Logistik Candi", email: "head.logistik.candi@siagabencana.local", division: "LOGISTICS" as const },
+        { name: "Head Shelter Candi", email: "head.shelter.candi@siagabencana.local", division: "SHELTER" as const },
+        { name: "Head Data Candi", email: "head.data.candi@siagabencana.local", division: "DATA_REGISTRATION" as const },
+    ]) {
+        await prisma.user.create({
+            data: {
+                name: head.name,
+                email: head.email,
+                password: passwordHash,
+                role: "DIVISION_HEAD",
+                division: head.division,
+                campId: camp1.id,
+                divisionHeadAssignments: { create: { campId: camp1.id, division: head.division } },
+            },
+        });
+    }
 
     console.log("✅ Users created");
 
@@ -293,10 +291,12 @@ async function main() {
     console.log("   Email    : admin@siagabencana.local");
     console.log("   Password : password");
     console.log("");
-    console.log("MANAGERS");
-    console.log("   manager.logistik.candi@siagabencana.local");
-    console.log("   manager.shelter.candi@siagabencana.local");
-    console.log("   manager.data.candi@siagabencana.local");
+    console.log("MANAGER");
+    console.log("   manager.candi@siagabencana.local");
+    console.log("DIVISION HEADS");
+    console.log("   head.logistik.candi@siagabencana.local");
+    console.log("   head.shelter.candi@siagabencana.local");
+    console.log("   head.data.candi@siagabencana.local");
     console.log("");
     console.log("FIELD OFFICERS");
     console.log("   field.logistik.candi@siagabencana.local");

@@ -9,6 +9,7 @@ generator client {
 enum Role {
   SUPER_ADMIN
   MANAGER
+  DIVISION_HEAD
   FIELD_OFFICER
 }
 
@@ -36,115 +37,272 @@ enum FacilityStatus {
   REPAIRING
 }
 
+enum DistributionStatus {
+  PENDING
+  APPROVED
+  RESERVED
+  REJECTED
+  SHIPPED
+  RECEIVED
+  CANCELLED
+}
+
+enum InventoryMovementType {
+  RECEIPT
+  DAMAGE
+  LOSS
+  RESERVATION
+  RESERVATION_RELEASE
+  DISTRIBUTION_OUT
+  DISTRIBUTION_IN
+}
+
 model User {
-  id        String       @id @default(cuid())
-  name      String
-  email     String       @unique
-  password  String
-  
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  password String
 
-  role      Role
-  division  DivisionType?
+  role     Role
+  division DivisionType?
 
-  campId    String?
-  camp      Camp?        @relation(fields: [campId], references: [id], onDelete: SetNull)
-  sessions Session[]
+  campId                    String?
+  camp                      Camp?               @relation("CampStaff", fields: [campId], references: [id], onDelete: SetNull)
+  managedCamp               Camp?               @relation("CampManager")
+  divisionHeadAssignments   CampDivisionHead[]  @relation("DivisionHeadUser")
+  sessions                  Session[]
+  logisticsRequestsCreated  LogisticsRequest[]  @relation("RequestCreatedBy")
+  logisticsRequestsReviewed LogisticsRequest[]  @relation("RequestReviewedBy")
+  distributionsCreated      Distribution[]      @relation("DistributionCreatedBy")
+  inventoryMovementsCreated InventoryMovement[] @relation("InventoryMovementCreator")
+  auditLogs                 AuditLog[]          @relation("AuditLogUser")
 
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([campId])
   @@index([role, division])
 }
 
 model Camp {
-  id               String           @id @default(cuid())
-  name             String
-  address          String
+  id      String @id @default(cuid())
+  name    String
+  address String
 
-  latitude         Float
-  longitude        Float
+  latitude  Float
+  longitude Float
 
   maxCapacity      Int
-  currentOccupants Int              @default(0)
+  currentOccupants Int @default(0)
 
-  status            CampStatus      @default(ACTIVE)
+  status CampStatus @default(ACTIVE)
 
-  staff             User[]
-  logistics         LogisticsItem[]
-  facilities        FacilityReport[]
-  evacuees          EvacueeRecord[]
+  managerId          String?             @unique
+  manager            User?               @relation("CampManager", fields: [managerId], references: [id], onDelete: SetNull)
+  staff              User[]              @relation("CampStaff")
+  divisionHeads      CampDivisionHead[]
+  logistics          LogisticsItem[]
+  facilities         FacilityReport[]
+  evacuees           EvacueeRecord[]
+  requestsFrom       LogisticsRequest[]  @relation("RequestSourceCamp")
+  requestsTo         LogisticsRequest[]  @relation("RequestDestinationCamp")
+  distributionsFrom  Distribution[]      @relation("DistributionSourceCamp")
+  distributionsTo    Distribution[]      @relation("DistributionDestinationCamp")
+  inventoryMovements InventoryMovement[]
 
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
 }
 
-model LogisticsItem {
-  id        String     @id @default(cuid())
-
+model CampDivisionHead {
+  id        String       @id @default(cuid())
   campId    String
-  camp      Camp       @relation(fields: [campId], references: [id], onDelete: Cascade)
+  division  DivisionType
+  userId    String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
-  itemName  String
-  quantity  Int
-  unit      String
+  camp Camp @relation(fields: [campId], references: [id], onDelete: Cascade)
+  user User @relation("DivisionHeadUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  status    ItemStatus @default(SUFFICIENT)
-  notes     String?
+  @@unique([campId, division])
+  @@unique([userId, campId])
+  @@index([userId])
+}
 
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+model LogisticsItem {
+  id String @id @default(cuid())
+
+  campId String
+  camp   Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  itemName         String
+  quantity         Int
+  reservedQuantity Int    @default(0)
+  damagedQuantity  Int    @default(0)
+  minimumQuantity  Int    @default(0)
+  unit             String
+
+  status              ItemStatus     @default(SUFFICIENT)
+  notes               String?
+  sourceDistributions Distribution[] @relation("DistributionSourceItem")
+
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  movements InventoryMovement[]
 
   @@index([campId])
   @@index([campId, status])
 }
 
-model FacilityReport {
-  id           String         @id @default(cuid())
+model InventoryMovement {
+  id              String                @id @default(cuid())
+  logisticsItemId String
+  campId          String
+  type            InventoryMovementType
+  quantity        Int
+  reason          String?
+  createdById     String?
+  distributionId  String?
+  createdAt       DateTime              @default(now())
 
-  campId       String
-  camp         Camp           @relation(fields: [campId], references: [id], onDelete: Cascade)
+  logisticsItem LogisticsItem @relation(fields: [logisticsItemId], references: [id], onDelete: Restrict)
+  camp          Camp          @relation(fields: [campId], references: [id], onDelete: Restrict)
+  createdBy     User?         @relation("InventoryMovementCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  distribution  Distribution? @relation(fields: [distributionId], references: [id], onDelete: SetNull)
+
+  @@index([logisticsItemId, createdAt])
+  @@index([campId, createdAt])
+  @@index([type, createdAt])
+  @@index([distributionId])
+}
+
+model LogisticsRequest {
+  id                String  @id @default(cuid())
+  sourceCampId      String
+  destinationCampId String
+  createdById       String
+  reviewedById      String?
+
+  itemName        String
+  quantity        Int
+  unit            String
+  notes           String?
+  rejectionReason String?
+  status          DistributionStatus @default(PENDING)
+
+  sourceCamp      Camp          @relation("RequestSourceCamp", fields: [sourceCampId], references: [id], onDelete: Cascade)
+  destinationCamp Camp          @relation("RequestDestinationCamp", fields: [destinationCampId], references: [id], onDelete: Cascade)
+  createdBy       User          @relation("RequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy      User?         @relation("RequestReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  distribution    Distribution?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceCampId])
+  @@index([destinationCampId])
+  @@index([status])
+  @@index([createdById])
+}
+
+model Distribution {
+  id                String  @id @default(cuid())
+  requestId         String  @unique
+  sourceCampId      String
+  destinationCampId String
+  sourceItemId      String?
+  createdById       String
+
+  itemName   String
+  quantity   Int
+  unit       String
+  notes      String?
+  status     DistributionStatus @default(APPROVED)
+  shippedAt  DateTime?
+  receivedAt DateTime?
+
+  inventoryMovements InventoryMovement[]
+
+  request         LogisticsRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  sourceItem      LogisticsItem?   @relation("DistributionSourceItem", fields: [sourceItemId], references: [id], onDelete: SetNull)
+  sourceCamp      Camp             @relation("DistributionSourceCamp", fields: [sourceCampId], references: [id], onDelete: Cascade)
+  destinationCamp Camp             @relation("DistributionDestinationCamp", fields: [destinationCampId], references: [id], onDelete: Cascade)
+  createdBy       User             @relation("DistributionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceCampId])
+  @@index([destinationCampId])
+  @@index([status])
+  @@index([createdById])
+}
+
+model FacilityReport {
+  id String @id @default(cuid())
+
+  campId String
+  camp   Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
 
   facilityName String
   status       FacilityStatus @default(GOOD)
   description  String
 
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([campId])
   @@index([campId, status])
 }
 
 model EvacueeRecord {
-  id              String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  campId          String
-  camp            Camp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  campId String
+  camp   Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
 
   name            String
-  totalFamily     Int      @default(1)
-  hasSpecialNeeds Boolean  @default(false)
+  totalFamily     Int     @default(1)
+  hasSpecialNeeds Boolean @default(false)
 
-  notes           String?
+  notes String?
 
-  arrivedAt       DateTime @default(now())
-  departedAt      DateTime?
+  arrivedAt  DateTime  @default(now())
+  departedAt DateTime?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([campId])
   @@index([campId, departedAt])
   @@index([campId, hasSpecialNeeds])
-}model Session {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
+}
 
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  user User? @relation("AuditLogUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([entity, createdAt])
+}
+
+model Session {
+  id        String @id @default(cuid())
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   expiresAt DateTime
   createdAt DateTime @default(now())

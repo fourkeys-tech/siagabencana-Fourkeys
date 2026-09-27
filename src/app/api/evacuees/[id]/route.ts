@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 type Params = {
     params: Promise<{ id: string }>;
@@ -36,10 +36,7 @@ export async function GET(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            user.campId !== evacuee.campId
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "DATA_REGISTRATION", evacuee.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -51,6 +48,10 @@ export async function GET(
             data: evacuee,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_EVACUEE_ERROR", error);
 
         return NextResponse.json(
@@ -82,11 +83,7 @@ export async function PUT(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== existing.campId ||
-                user.division !== "DATA_REGISTRATION")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "DATA_REGISTRATION", existing.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -118,6 +115,10 @@ export async function PUT(
             data: updated,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("UPDATE_EVACUEE_ERROR", error);
 
         return NextResponse.json(
@@ -149,11 +150,7 @@ export async function DELETE(
             );
         }
 
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (user.campId !== existing.campId ||
-                user.division !== "DATA_REGISTRATION")
-        ) {
+        if (user.role !== "SUPER_ADMIN" && !canManageDivision(user, "DATA_REGISTRATION", existing.campId)) {
             return NextResponse.json(
                 { success: false, message: "Forbidden" },
                 { status: 403 },
@@ -182,6 +179,10 @@ export async function DELETE(
             message: "Data pengungsi berhasil dihapus.",
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("DELETE_EVACUEE_ERROR", error);
 
         return NextResponse.json(

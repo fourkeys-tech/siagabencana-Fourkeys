@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession } from "@/lib/auth/session";
+import { writeAuditLog } from "@/lib/audit";
 
 export async function POST(request: Request) {
     try {
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
         }
 
         await createSession(user.id);
+        await writeAuditLog({ userId: user.id, action: "LOGIN", entity: "Session", details: { email: user.email } });
 
         return NextResponse.json({
             success: true,

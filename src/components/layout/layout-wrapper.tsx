@@ -2,8 +2,8 @@
 
 import { usePathname } from "next/navigation";
 import { AppLayout } from "./app-layout";
-import { AuthLayout } from "./auth-layout";
 import { AuthGuard } from "@/components/auth/auth-guard";
+import { UserProvider } from "@/components/auth/user-provider";
 
 const authRoutes = ["/login"];
 const publicRoutes = ["/public"];
@@ -15,17 +15,26 @@ export function LayoutWrapper({
 }) {
 	const pathname = usePathname();
 
-	if (pathname === "/" || publicRoutes.some((route) => pathname.startsWith(route))) {
+	// Landing page dan halaman publik
+	if (
+		pathname === "/" ||
+		publicRoutes.some((route) => pathname.startsWith(route))
+	) {
 		return <>{children}</>;
 	}
 
+	// Halaman login
+	// LoginPage sendiri sudah menggunakan AuthLayout
 	if (authRoutes.some((route) => pathname.startsWith(route))) {
-		return <AuthLayout>{children}</AuthLayout>;
+		return <>{children}</>;
 	}
 
+	// Semua halaman lainnya membutuhkan autentikasi
 	return (
-		<AuthGuard>
-			<AppLayout>{children}</AppLayout>
-		</AuthGuard>
+		<UserProvider>
+			<AuthGuard>
+				<AppLayout>{children}</AppLayout>
+			</AuthGuard>
+		</UserProvider>
 	);
 }

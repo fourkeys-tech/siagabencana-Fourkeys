@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 export async function GET() {
     try {
@@ -133,16 +133,8 @@ export async function GET() {
             },
         });
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message === "UNAUTHORIZED") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Unauthorized",
-                    },
-                    { status: 401 },
-                );
-            }
+        if (isAuthError(error)) {
+            return authError(error);
         }
 
         console.error("DASHBOARD_ERROR", error);

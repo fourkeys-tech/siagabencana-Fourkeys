@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "@/components/auth/user-provider";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
@@ -25,6 +26,8 @@ export default function UserEditPage() {
 	const params = useParams();
 	const router = useRouter();
 	const { id } = params;
+	const { user: currentUser } = useSession();
+	const managerEditing = currentUser?.role === "MANAGER";
 
 	const [user, setUser] = useState<User | null>(null);
 	const [camps, setCamps] = useState<Camp[]>([]);
@@ -113,21 +116,19 @@ export default function UserEditPage() {
 		);
 	}
 
-	if (error) {
-		return <Alert type="error">{error}</Alert>;
+	if (error && !user) {
+		return <div className="space-y-4"><Alert type="error">{error}</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
 	}
 
 	if (!user) {
-		return <Alert type="info">Pengguna tidak ditemukan.</Alert>;
+		return <div className="space-y-4"><Alert type="info">Pengguna tidak ditemukan.</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
 	}
 
 	const isSuperAdmin = formData.role === "SUPER_ADMIN";
 
 	return (
 		<div className="space-y-6">
-			<h1 className="text-2xl font-bold text-gray-900">
-				Edit Pengguna: {user.name}
-			</h1>
+			<div><Link href={`/users/${user.id}`} className="text-sm font-medium text-blue-600 hover:underline">← Kembali ke Detail Pengguna</Link><h1 className="mt-2 text-2xl font-bold text-gray-900">Edit Pengguna: {user.name}</h1></div>
 
 			{error && <Alert type="error">{error}</Alert>}
 
@@ -161,16 +162,19 @@ export default function UserEditPage() {
 					label="Peran"
 					value={formData.role}
 					onChange={(v) =>
-						setFormData({ ...formData, role: v, division: v === "SUPER_ADMIN" ? "" : formData.division, campId: v === "SUPER_ADMIN" ? "" : formData.campId, })
+						setFormData({ ...formData, role: v, division: v === "SUPER_ADMIN" || v === "MANAGER" ? "" : formData.division, campId: v === "SUPER_ADMIN" ? "" : formData.campId, })
 					}
 					options={[
-						{ value: "SUPER_ADMIN", label: "Super Admin" },
-						{ value: "MANAGER", label: "Manager" },
+						{ value: "DIVISION_HEAD", label: "Ketua Divisi" },
 						{ value: "FIELD_OFFICER", label: "Field Officer" },
+						...(managerEditing ? [] : [
+							{ value: "SUPER_ADMIN", label: "Super Admin" },
+							{ value: "MANAGER", label: "Manager" },
+						]),
 					]}
 					required
 				/>
-				{!isSuperAdmin && (
+				{!isSuperAdmin && formData.role !== "MANAGER" && (
 					<FormSelect
 						label="Divisi"
 						value={formData.division}

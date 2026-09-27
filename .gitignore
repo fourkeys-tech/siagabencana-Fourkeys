@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+siagabencana-fourkeys-71286db97c63.json
 
 # debug
 npm-debug.log*

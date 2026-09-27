@@ -5,13 +5,16 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { FormField, FormSelect } from "@/components/ui/form-field";
+import { FormField } from "@/components/ui/form-field";
 
 interface LogisticsItem {
 	id: string;
 	campId: string;
 	itemName: string;
 	quantity: number;
+	reservedQuantity: number;
+	damagedQuantity: number;
+	minimumQuantity: number;
 	unit: string;
 	status: string;
 	notes: string | null;
@@ -68,9 +71,7 @@ export default function LogisticsEditPage() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					itemName: formData.itemName,
-					quantity: Number(formData.quantity),
 					unit: formData.unit,
-					status: formData.status,
 					notes: formData.notes || null,
 				}),
 			});
@@ -125,35 +126,16 @@ export default function LogisticsEditPage() {
 					}
 					required
 				/>
-				<FormField
-					label="Jumlah"
-					type="number"
-					value={formData.quantity}
-					onChange={(v) =>
-						setFormData({ ...formData, quantity: v })
-					}
-					required
-				/>
+				<div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+					Saldo stok tidak diedit langsung. Gunakan menu Logistik untuk mencatat stok masuk, barang rusak, atau kehilangan.
+					<div className="mt-2 font-semibold">Layak: {item.quantity} {item.unit} · Reserved: {item.reservedQuantity} · Rusak: {item.damagedQuantity}</div>
+				</div>
 				<FormField
 					label="Unit"
 					value={formData.unit}
 					onChange={(v) =>
 						setFormData({ ...formData, unit: v })
 					}
-					required
-				/>
-				<FormSelect
-					label="Status"
-					value={formData.status}
-					onChange={(v) =>
-						setFormData({ ...formData, status: v })
-					}
-					options={[
-						{ value: "SUFFICIENT", label: "SUFFICIENT" },
-						{ value: "LOW", label: "LOW" },
-						{ value: "CRITICAL", label: "CRITICAL" },
-						{ value: "SPOILED_OR_DAMAGED", label: "SPOILED_OR_DAMAGED" },
-					]}
 					required
 				/>
 				<FormField

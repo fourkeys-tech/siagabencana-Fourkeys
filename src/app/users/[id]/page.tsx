@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useSession } from "@/components/auth/user-provider";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ interface User {
 export default function UserDetailPage() {
 	const params = useParams();
 	const router = useRouter();
+	const { user: currentUser } = useSession();
 	const { id } = params;
 
 	const [user, setUser] = useState<User | null>(null);
@@ -69,26 +71,24 @@ export default function UserDetailPage() {
 	}
 
 	if (error) {
-		return <Alert type="error">{error}</Alert>;
+		return <div className="space-y-4"><Alert type="error">{error}</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
 	}
 
 	if (!user) {
-		return <Alert type="info">Pengguna tidak ditemukan.</Alert>;
+		return <div className="space-y-4"><Alert type="info">Pengguna tidak ditemukan.</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
 	}
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-bold text-gray-900">
-					Detail Pengguna: {user.name}
-				</h1>
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div><Link href="/users" className="text-sm font-medium text-blue-600 hover:underline">← Kembali ke Pengguna</Link><h1 className="mt-2 text-2xl font-bold text-gray-900">Detail Pengguna: {user.name}</h1></div>
 				<div className="flex gap-2">
 					<Link href={`/users/${user.id}/edit`}>
 						<Button variant="secondary">Edit</Button>
 					</Link>
-					<Button variant="danger" onClick={handleDelete}>
+					{currentUser?.role === "SUPER_ADMIN" && user.id !== currentUser.id && <Button variant="danger" onClick={handleDelete}>
 						Hapus
-					</Button>
+					</Button>}
 				</div>
 			</div>
 

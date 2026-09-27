@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth/guard";
+import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { receiveStock } from "@/lib/inventory";
+import { canManageDivision } from "@/lib/auth/guard";
 
 export async function GET() {
     try {
         const user = await requireAuth();
 
-        const where =
-            user.role === "SUPER_ADMIN"
-                ? {}
-                : {
-                    campId: user.campId!,
-                };
+        if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "LOGISTICS", user.campId))) {
+            return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi logistik posko ini." }, { status: 403 });
+        }
+        const where = user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! };
 
         const items = await prisma.logisticsItem.findMany({
             where,
@@ -31,13 +31,8 @@ export async function GET() {
             data: items,
         });
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message === "UNAUTHORIZED") {
-                return NextResponse.json(
-                    { success: false, message: "Unauthorized" },
-                    { status: 401 },
-                );
-            }
+        if (isAuthError(error)) {
+            return authError(error);
         }
 
         console.error("GET_LOGISTICS_ERROR", error);
@@ -55,7 +50,7 @@ export async function POST(request: Request) {
 
         if (
             user.role !== "SUPER_ADMIN" &&
-            (user.division !== "LOGISTICS" || !user.campId)
+            (!user.campId || !canManageDivision(user, "LOGISTICS", user.campId))
         ) {
             return NextResponse.json(
                 {
@@ -98,24 +93,35 @@ export async function POST(request: Request) {
             data: {
                 campId,
                 itemName: String(body.itemName).trim(),
-                quantity: Number(body.quantity),
+                quantity: 0,
                 unit: String(body.unit).trim(),
-                status: body.status ?? "SUFFICIENT",
-                notes: body.notes
-                    ? String(body.notes).trim()
-                    : null,
+                minimumQuantity: Number(body.minimumQuantity ?? 0),
+                notes: body.notes ? String(body.notes).trim() : null,
             },
         });
+
+        const result = Number(body.quantity) > 0
+            ? await receiveStock({
+                logisticsItemId: item.id,
+                quantity: Number(body.quantity),
+                createdById: user.id,
+                reason: body.reason ?? "Stok awal dicatat",
+            })
+            : item;
 
         return NextResponse.json(
             {
                 success: true,
                 message: "Data logistik berhasil dibuat.",
-                data: item,
+                data: result,
             },
             { status: 201 },
         );
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("CREATE_LOGISTICS_ERROR", error);
 
         return NextResponse.json(

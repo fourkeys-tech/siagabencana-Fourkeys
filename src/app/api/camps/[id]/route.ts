@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth/guard";
+import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 
 type Params = {
     params: Promise<{
@@ -13,6 +13,8 @@ export async function GET(
     { params }: Params,
 ) {
     try {
+        await requireAuth();
+
         const { id } = await params;
 
         const camp = await prisma.camp.findUnique({
@@ -46,6 +48,10 @@ export async function GET(
             data: camp,
         });
     } catch (error) {
+        if (isAuthError(error)) {
+            return authError(error);
+        }
+
         console.error("GET_CAMP_ERROR", error);
 
         return NextResponse.json(
@@ -112,26 +118,11 @@ export async function PUT(
             data: camp,
         });
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message === "UNAUTHORIZED") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Unauthorized",
-                    },
-                    { status: 401 },
-                );
-            }
-
-            if (error.message === "FORBIDDEN") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Hanya Super Admin yang dapat mengubah posko.",
-                    },
-                    { status: 403 },
-                );
-            }
+        if (isAuthError(error)) {
+            return authError(
+                error,
+                "Hanya Super Admin yang dapat mengubah posko.",
+            );
         }
 
         console.error("UPDATE_CAMP_ERROR", error);
@@ -178,26 +169,11 @@ export async function DELETE(
             message: "Posko berhasil dihapus.",
         });
     } catch (error) {
-        if (error instanceof Error) {
-            if (error.message === "UNAUTHORIZED") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Unauthorized",
-                    },
-                    { status: 401 },
-                );
-            }
-
-            if (error.message === "FORBIDDEN") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Hanya Super Admin yang dapat menghapus posko.",
-                    },
-                    { status: 403 },
-                );
-            }
+        if (isAuthError(error)) {
+            return authError(
+                error,
+                "Hanya Super Admin yang dapat menghapus posko.",
+            );
         }
 
         console.error("DELETE_CAMP_ERROR", error);

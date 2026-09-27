@@ -1,54 +1,76 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "./user-provider";
+import { canAccessPath, findNavItem } from "@/lib/navigation";
+import { Alert } from "@/components/ui/alert";
 
-export function AuthGuard({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
-    const router = useRouter();
-    const pathname = usePathname();
-    const [loading, setLoading] = useState(true);
+export function AuthGuard({ children }: { children: React.ReactNode }) {
+	const router = useRouter();
+	const pathname = usePathname();
+	const { user, loading, refresh } = useSession();
 
-    useEffect(() => {
-        const checkAuth = async () => {
-            try {
-                const res = await fetch("/api/auth/me", {
-                    cache: "no-store",
-                });
+	useEffect(() => {
+		refresh();
+	}, [pathname, refresh]);
 
-                if (!res.ok) {
-                    router.replace("/login");
-                    return;
-                }
+	useEffect(() => {
+		if (!loading && !user) {
+			router.replace("/login");
+		}
+	}, [loading, user, router]);
 
-                const data = await res.json();
+	if (loading || !user) {
+		return (
+			<div className="min-h-screen flex items-center justify-center">
+				<span className="text-gray-500">Memuat...</span>
+			</div>
+		);
+	}
 
-                if (!data.success || !data.user) {
-                    router.replace("/login");
-                    return;
-                }
+	const match = findNavItem(pathname);
 
-                setLoading(false);
-            } catch {
-                router.replace("/login");
-            }
-        };
+	if (match?.item.disabled) {
+		return (
+			<div className="min-h-screen flex items-center justify-center p-6">
+				<div className="max-w-md space-y-4 text-center">
+					<Alert type="warning">
+						Halaman <strong>{match.item.label}</strong> masih dalam
+						pengembangan dan belum tersedia.
+					</Alert>
 
-        checkAuth();
-    }, [router, pathname]);
+					<Link
+						href="/dashboard"
+						className="text-sm font-medium text-blue-600 hover:underline"
+					>
+						Kembali ke Dashboard
+					</Link>
+				</div>
+			</div>
+		);
+	}
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <span className="text-gray-500">
-                    Memuat...
-                </span>
-            </div>
-        );
-    }
+	if (match && !canAccessPath(pathname, user)) {
+		return (
+			<div className="min-h-screen flex items-center justify-center p-6">
+				<div className="max-w-md space-y-4 text-center">
+					<Alert type="error">
+						Akses ditolak. Akun Anda tidak memiliki hak akses ke
+						halaman ini.
+					</Alert>
 
-    return <>{children}</>;
+					<Link
+						href="/dashboard"
+						className="text-sm font-medium text-blue-600 hover:underline"
+					>
+						Kembali ke Dashboard
+					</Link>
+				</div>
+			</div>
+		);
+	}
+
+	return <>{children}</>;
 }

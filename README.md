@@ -21,6 +21,8 @@ src/
 │   ├── public/            # Landing page publik (tanpa login)
 │   ├── login/             # Halaman login
 │   ├── dashboard/         # Dashboard statistik
+│   ├── monitoring/        # Monitoring operasional + peringatan
+│   ├── peta/              # Peta bencana (Leaflet, admin)
 │   ├── kelola-posko/      # CRUD posko (+ [id] detail, [id]/edit)
 │   ├── logistik/          # CRUD logistik
 │   ├── shelter/           # CRUD laporan fasilitas
@@ -28,13 +30,15 @@ src/
 │   ├── users/             # Manajemen pengguna (Super Admin)
 │   └── api/               # Route handlers (REST)
 ├── components/
-│   ├── ui/                # Button, Badge, Modal, Table, Form, Alert
+│   ├── ui/                # Button, Badge, Modal, Table, Form, Alert, Card
 │   ├── layout/            # Sidebar, Header, LayoutWrapper
-│   ├── auth/              # AuthGuard
+│   ├── auth/              # AuthGuard, UserProvider
 │   └── public/            # CampMap (peta)
 ├── lib/
 │   ├── prisma.ts          # Prisma client singleton
 │   ├── seed.ts            # Script seed data
+│   ├── navigation.ts      # Konfigurasi menu + guard role
+│   ├── occupancy.ts       # Helper warna okupansi
 │   └── auth/              # session.ts, guard.ts
 └── proxy.ts               # Redirect "/" → "/public"
 prisma/
@@ -119,6 +123,8 @@ Buka [http://localhost:3000](http://localhost:3000) — akan otomatis diarahkan 
 
 ## Tata Cara Penggunaan
 
+Menu di sidebar dikelompokkan per bagian (**Overview**, **Operasional**, **Data & Informasi**, **Administrasi**). Menu yang belum tersedia ditandai badge **Segera** (non-aktif), dan menu **Pengguna** hanya terlihat oleh Super Admin. Navigasi juga dijaga di sisi server: mengakses halaman tanpa hak akses akan menampilkan layar "Akses ditolak".
+
 ### 1. Halaman Publik — `/public`
 
 Diakses **tanpa login**. Buka `http://localhost:3000/` (root otomatis di-redirect ke sini).
@@ -145,13 +151,30 @@ Silakan gunakan akun bawaan hasil seed:
 
 > Sesuaikan email dan password akun Anda masing-masing melalui menu **Pengguna** (hanya Super Admin) setelah login.
 
-Sesi berlaku **7 hari** (cookie `siaga_session`). Klik **Logout** di header untuk keluar.
+Sesi berlaku **7 hari** (cookie `siaga_session`). Klik **Keluar** di sidebar untuk logout.
+
+Konfigurasi integrasi Google Sheets memakai environment variable `GOOGLE_SPREADSHEET_ID` dan `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`. Service account harus memiliki akses Editor pada spreadsheet tujuan. Kredensial hanya dipakai di server dan tidak dikirim ke browser.
 
 ### 3. Dashboard — `/dashboard`
 
 Menampilkan kartu statistik (posko, kapasitas, okupansi, petugas, logistik kritis, fasilitas rusak, pengungsi) dan daftar seluruh posko.
 
-### 4. Kelola Posko — `/kelola-posko`
+### 4. Monitoring — `/monitoring`
+
+**Akses: semua role** (data di-scope ke posko sendiri untuk non-Super Admin).
+
+- **Ringkasan**: posko aktif, penghuni, okupansi, logistik bermasalah
+- **Peringatan otomatis**: posko hampir penuh (≥90%), stok logistik kritis, fasilitas rusak
+- **Status posko**: bar okupansi + jumlah penghuni, logistik bermasalah, dan fasilitas bermasalah per posko
+
+### 5. Peta Bencana — `/peta`
+
+**Akses: semua role** (memakai data yang sama dengan Monitoring).
+
+- Peta Leaflet + OpenStreetMap dengan marker berwarna sesuai okupansi — 🟢 hijau (<70%), 🟠 kuning (70–89%), 🔴 merah (≥90%)
+- Klik marker atau daftar posko di samping untuk melihat popup berisi kapasitas, okupansi, logistik bermasalah, dan fasilitas bermasalah
+
+### 6. Kelola Posko — `/kelola-posko`
 
 **Akses tulis: hanya Super Admin.**
 
@@ -161,7 +184,7 @@ Menampilkan kartu statistik (posko, kapasitas, okupansi, petugas, logistik kriti
 - **Toggle Status**: buka/tutup posko (ACTIVE ↔ CLOSED) — posko CLOSED tidak tampil di halaman publik
 - **Hapus**: klik `Hapus` pada baris atau di halaman detail
 
-### 5. Logistik — `/logistik`
+### 7. Logistik — `/logistik`
 
 **Akses tulis: Super Admin atau pengguna divisi LOGISTICS.**
 
@@ -171,14 +194,14 @@ Menampilkan kartu statistik (posko, kapasitas, okupansi, petugas, logistik kriti
 
 > Pengguna non-Super Admin hanya melihat data logistik posko mereka sendiri.
 
-### 6. Shelter — `/shelter`
+### 8. Shelter — `/shelter`
 
 **Akses tulis: Super Admin atau pengguna divisi SHELTER.**
 
 - **Tambah**: pilih posko, isi nama fasilitas, status (Baik/Rusak/Dalam Perbaikan), dan deskripsi
 - **Hapus**: klik `Hapus` pada baris
 
-### 7. Pengungsi — `/pengungsi`
+### 9. Pengungsi — `/pengungsi`
 
 **Akses tulis: Super Admin atau pengguna divisi DATA_REGISTRATION.**
 
@@ -187,9 +210,73 @@ Menampilkan kartu statistik (posko, kapasitas, okupansi, petugas, logistik kriti
 - **Check-out**: klik `Check-out` pada baris pengungsi yang masih aktif — okupansi posko otomatis berkurang
 - **Hapus**: menghapus data pengungsi aktif juga mengurangi okupansi posko
 
-### 8. Pengguna — `/users`
+### 10. Distribusi Logistik — `/distribusi`
+
+**Akses: Super Admin dan pengguna divisi LOGISTICS.**
+
+- Buat permintaan logistik antar posko
+- Review permintaan: setujui atau tolak
+- Pilih stok sumber saat menyetujui
+- Setujui permintaan sekaligus reservasi stok sumber
+- Batalkan permintaan berstatus reserved untuk melepas reservasi
+- Kirim distribusi dari posko asal
+- Terima distribusi di posko tujuan
+- Pengiriman mengurangi stok sumber dan penerimaan menambah stok tujuan secara transaksional
+
+### Pergerakan Stok
+
+Stok tidak diubah langsung melalui edit quantity. Gunakan pergerakan stok:
+
+- **Stok masuk** (`RECEIPT`) menambah stok layak
+- **Barang rusak** (`DAMAGE`) mengurangi stok tersedia dan menambah total rusak
+- **Kehilangan** (`LOSS`) mengurangi stok tersedia dengan alasan wajib
+- **Distribusi** memakai reservasi sebelum barang dikirim
+
+Setiap pergerakan menyimpan jumlah, alasan, user, waktu, dan relasi distribusi pada `InventoryMovement`. Data lama dengan status `SPOILED_OR_DAMAGED` tidak dimigrasikan otomatis dan harus diverifikasi manual.
+
+### 11. Laporan — `/laporan`
+
+**Akses: semua role** (data non-Super Admin dibatasi ke posko sendiri).
+
+- Pilih periode laporan
+- Lihat ringkasan posko, pengungsi, kapasitas, logistik, fasilitas, dan distribusi
+- Export PDF melalui dialog print browser
+- Kirim laporan langsung ke Google Sheets dengan format tabel rapi
+
+### 12. Pengaturan — `/pengaturan`
+
+**Akses: semua role.**
+
+- Ubah nama dan email profil
+- Ubah password dengan verifikasi password lama
+- Super Admin dapat melihat informasi sistem dan status konfigurasi layanan
+
+### 13. Riwayat Aktivitas — `/aktivitas`
+
+**Akses: semua role**. Super Admin melihat seluruh aktivitas, role lain melihat aktivitas akunnya sendiri.
+
+- Login dan logout
+- Pembuatan, perubahan, dan penghapusan pengguna
+- Aktivitas operasional berikutnya dapat ditambahkan ke audit log yang sama
+
+### 14. Pengguna & Struktur Tim — `/users`
 
 **Akses: hanya Super Admin.**
+
+Struktur organisasi posko:
+
+```text
+SUPER_ADMIN
+└── MANAGER (1 per posko)
+    ├── DIVISION_HEAD — LOGISTICS (1 per divisi/posko)
+    │   └── FIELD_OFFICER (banyak)
+    ├── DIVISION_HEAD — SHELTER
+    │   └── FIELD_OFFICER (banyak)
+    └── DIVISION_HEAD — DATA_REGISTRATION
+        └── FIELD_OFFICER (banyak)
+```
+
+Super Admin menetapkan manager dan ketua divisi melalui struktur tim. Manager mengawasi seluruh divisi poskonya, sedangkan ketua divisi dan Field Officer bekerja sesuai divisinya.
 
 - **Tambah**: nama, email, password, peran (Super Admin/Manager/Field Officer), divisi, dan posko
   - Manager & Field Officer **wajib** memiliki divisi dan posko; Super Admin tidak
@@ -200,14 +287,16 @@ Menampilkan kartu statistik (posko, kapasitas, okupansi, petugas, logistik kriti
 
 ## Matriks Hak Akses
 
-| Aksi | SUPER_ADMIN | MANAGER | FIELD_OFFICER |
-| --- | --- | --- | --- |
-| Kelola posko (CRUD) | ✅ | ❌ | ❌ |
-| Manajemen pengguna | ✅ | ❌ | ❌ |
-| Logistik | ✅ (semua posko) | ✅ (divisi LOGISTICS) | ✅ (divisi LOGISTICS) |
-| Shelter/fasilitas | ✅ (semua posko) | ✅ (divisi SHELTER) | ✅ (divisi SHELTER) |
-| Pengungsi | ✅ (semua posko) | ✅ (divisi DATA_REGISTRATION) | ✅ (divisi DATA_REGISTRATION) |
+| Aksi | SUPER_ADMIN | MANAGER | DIVISION_HEAD | FIELD_OFFICER |
+| --- | --- | --- | --- | --- |
+| Kelola posko | ✅ | ❌ | ❌ | ❌ |
+| Manajemen pengguna | ✅ | ❌ | ❌ | ❌ |
+| Kelola logistik posko | ✅ (semua posko) | ✅ (posko sendiri) | ✅ (LOGISTICS) | ✅ (LOGISTICS) |
+| Kelola shelter/fasilitas | ✅ (semua posko) | ✅ (posko sendiri) | ✅ (SHELTER) | ✅ (SHELTER) |
+| Kelola pengungsi | ✅ (semua posko) | ✅ (posko sendiri) | ✅ (DATA_REGISTRATION) | ✅ (DATA_REGISTRATION) |
+| Kelola distribusi | ✅ | ✅ (posko sendiri) | ✅ (LOGISTICS) | ✅ (LOGISTICS) |
 | Lihat dashboard | ✅ | ✅ (posko sendiri) | ✅ (posko sendiri) |
+| Monitoring & peta | ✅ | ✅ (posko sendiri) | ✅ (posko sendiri) |
 
 ---
 
@@ -233,7 +322,7 @@ Semua API mengembalikan JSON dengan format `{ success: boolean, message?: string
 
 ### Terproteksi (membutuhkan sesi login)
 
-> Catatan: `GET /api/camps` dan `GET /api/camps/[id]` terbuka tanpa sesi (read-only); seluruh operasi tulis dan endpoint lainnya membutuhkan sesi valid.
+> Catatan: seluruh endpoint di bawah membutuhkan sesi login valid. Endpoint publik hanya tersedia di `/api/public/*`.
 
 | Method | Endpoint | Fungsi |
 | --- | --- | --- |
@@ -249,15 +338,24 @@ Semua API mengembalikan JSON dengan format `{ success: boolean, message?: string
 | GET/POST | `/api/users` | List / buat pengguna |
 | GET/PUT/DELETE | `/api/users/[id]` | Detail / ubah / hapus pengguna |
 | GET | `/api/dashboard` | Statistik dashboard |
+| GET/POST | `/api/distribution` | List / buat permintaan distribusi |
+| GET/PUT | `/api/distribution/[id]` | Detail, review, kirim, atau terima distribusi |
+| GET | `/api/reports` | Laporan periode: summary, posko, pengungsi, logistik, fasilitas, distribusi (scoped) |
+| POST | `/api/reports/sheets` | Kirim laporan periode ke Google Sheets dalam tabel terformat (scoped) |
+| GET | `/api/monitoring` | Monitoring: summary + peringatan + status posko (scoped) |
 
 ---
 
 ## Model Database
 
-- **User** — akun dengan peran `SUPER_ADMIN` | `MANAGER` | `FIELD_OFFICER` dan divisi `LOGISTICS` | `SHELTER` | `DATA_REGISTRATION`
+- **User** — akun dengan peran `SUPER_ADMIN` | `MANAGER` | `DIVISION_HEAD` | `FIELD_OFFICER` dan divisi `LOGISTICS` | `SHELTER` | `DATA_REGISTRATION`
+- **CampDivisionHead** — satu ketua untuk setiap kombinasi posko dan divisi
 - **Camp** — posko: lokasi (lat/lng), kapasitas, okupansi, status `ACTIVE` | `CLOSED`
 - **LogisticsItem** — item logistik per posko dengan status ketersediaan
 - **FacilityReport** — laporan kondisi fasilitas per posko
+- **AuditLog** — riwayat aktivitas user dan aksi sistem
+- **LogisticsRequest** — permintaan logistik antar posko dengan status review
+- **Distribution** — pengiriman dan penerimaan logistik yang terhubung ke stok sumber
 - **EvacueeRecord** — data pengungsi per posko (registrasi & check-out)
 - **Session** — sesi login (hash token, kedaluwarsa 7 hari)
 

@@ -1,244 +1,39 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { FormField, FormSelect } from "@/components/ui/form-field";
+import { useSession } from "@/components/auth/user-provider";
 
-interface User {
-	id: string;
-	name: string;
-	email: string;
-	role: string;
-	division: string | null;
-	camp: { name: string } | null;
-	createdAt: string;
-}
+interface User { id: string; name: string; email: string; role: string; division: string | null; campId: string | null; camp: { id: string; name: string } | null; createdAt: string; }
+interface Camp { id: string; name: string; managerId: string | null; manager: { id: string; name: string } | null; divisionHeads: Array<{ division: string; user: { id: string; name: string } }>; }
+interface UserForm { name: string; email: string; password: string; role: string; division: string; campId: string; }
+const initialForm: UserForm = { name: "", email: "", password: "", role: "FIELD_OFFICER", division: "", campId: "" };
+const divisions = [{ value: "LOGISTICS", label: "Logistik" }, { value: "SHELTER", label: "Shelter" }, { value: "DATA_REGISTRATION", label: "Data Registration" }];
 
 export default function UsersPage() {
-	const [users, setUsers] = useState<User[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState("");
-	const [showModal, setShowModal] = useState(false);
-	const [formData, setFormData] = useState({
-		name: "",
-		email: "",
-		password: "",
-		role: "MANAGER",
-		division: "",
-		campId: "",
-	});
+	const router = useRouter();
+	const { user: currentUser } = useSession();
+	const canManageStructure = currentUser?.role === "SUPER_ADMIN";
+	const [users, setUsers] = useState<User[]>([]); const [camps, setCamps] = useState<Camp[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [formOpen, setFormOpen] = useState(false); const [assignmentCamp, setAssignmentCamp] = useState<Camp | null>(null); const [form, setForm] = useState(initialForm); const [busy, setBusy] = useState(false);
+	const load = useCallback(async () => { setLoading(true); try { const [usersResponse, campsResponse] = await Promise.all([fetch("/api/users", { cache: "no-store" }), fetch("/api/camps", { cache: "no-store" })]); const [usersData, campsData] = await Promise.all([usersResponse.json(), campsResponse.json()]); if (!usersResponse.ok || !usersData.success) throw new Error(usersData.message); if (!campsResponse.ok || !campsData.success) throw new Error(campsData.message); setUsers(usersData.data); setCamps(campsData.data); } catch (e) { setError(e instanceof Error ? e.message : "Gagal memuat pengguna."); } finally { setLoading(false); } }, []);
+	useEffect(() => { const timer = window.setTimeout(load, 0); return () => window.clearTimeout(timer); }, [load]);
+	const submitUser = async (event: React.FormEvent) => { event.preventDefault(); if (form.role !== "SUPER_ADMIN" && !form.campId) { setError("Pilih posko."); return; } if (["DIVISION_HEAD", "FIELD_OFFICER"].includes(form.role) && !form.division) { setError("Pilih divisi."); return; } setBusy(true); setError(""); try { const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, division: form.role === "MANAGER" || form.role === "SUPER_ADMIN" ? null : form.division, campId: form.role === "SUPER_ADMIN" ? null : form.campId }) }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message); setFormOpen(false); setForm(initialForm); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal membuat pengguna."); } finally { setBusy(false); } };
+	const assignManager = async (camp: Camp, userId: string) => { setBusy(true); setError(""); try { const response = await fetch(`/api/camps/${camp.id}/manager`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: userId || null }) }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message); await load(); setAssignmentCamp(null); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menetapkan manager."); } finally { setBusy(false); } };
+	const assignHead = async (camp: Camp, division: string, userId: string) => { setBusy(true); setError(""); try { const response = await fetch(`/api/camps/${camp.id}/division-head`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ division, userId: userId || null }) }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message); await load(); setAssignmentCamp(null); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menetapkan ketua divisi."); } finally { setBusy(false); } };
+	const deleteUser = async (user: User) => { if (!window.confirm(`Hapus akun ${user.name}?`)) return; setBusy(true); try { const response = await fetch(`/api/users/${user.id}`, { method: "DELETE" }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message); await load(); } catch (e) { setError(e instanceof Error ? e.message : "Gagal menghapus pengguna."); } finally { setBusy(false); } };
+	const selectedCamp = assignmentCamp;
+	const managerCandidates = users.filter((user) => user.role === "MANAGER" && user.campId === selectedCamp?.id);
+	const headCandidates = (division: string) => users.filter((user) => user.role === "DIVISION_HEAD" && user.campId === selectedCamp?.id && user.division === division);
 
-	const loadData = useCallback(() => {
-		return fetch("/api/users")
-			.then((res) => res.json())
-			.then((data) => {
-				if (data.success) setUsers(data.data);
-				else setError(data.message ?? "Gagal memuat data");
-			})
-			.catch(() => setError("Terjadi kesalahan"))
-			.finally(() => setLoading(false));
-	}, []);
-
-	useEffect(() => {
-		loadData();
-	}, [loadData]);
-
-	const handleCreate = async () => {
-		try {
-			const res = await fetch("/api/users", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(formData),
-			});
-			const data = await res.json();
-			if (data.success) {
-				setShowModal(false);
-				setFormData({ name: "", email: "", password: "", role: "MANAGER", division: "", campId: "" });
-				loadData();
-			} else {
-				setError(data.message);
-			}
-		} catch {
-			setError("Terjadi kesalahan");
-		}
-	};
-
-	const handleDelete = async (id: string) => {
-		if (!confirm("Hapus pengguna ini?")) return;
-		try {
-			const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
-			const data = await res.json();
-			if (data.success) loadData();
-			else setError(data.message);
-		} catch {
-			setError("Terjadi kesalahan");
-		}
-	};
-
-	return (
-		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-bold text-gray-900">
-					Pengguna
-				</h1>
-				<Button onClick={() => setShowModal(true)}>
-					+ Tambah Pengguna
-				</Button>
-			</div>
-
-			{error && (
-				<Alert type="error">{error}</Alert>
-			)}
-
-			{loading ? (
-				<div className="flex items-center justify-center h-64">
-					<span className="text-gray-500">Memuat...</span>
-				</div>
-			) : (
-				<div className="bg-white rounded-lg border overflow-hidden">
-					<table className="min-w-full divide-y divide-gray-200">
-						<thead className="bg-gray-50">
-							<tr>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Nama
-								</th>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Email
-								</th>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Peran
-								</th>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Divisi
-								</th>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Posko
-								</th>
-								<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-									Aksi
-								</th>
-							</tr>
-						</thead>
-						<tbody className="divide-y divide-gray-200">
-							{users.map((user) => (
-								<tr key={user.id} className="hover:bg-gray-50">
-									<td className="px-6 py-4 text-sm font-medium text-gray-900">
-										{user.name}
-									</td>
-									<td className="px-6 py-4 text-sm text-gray-900">
-										{user.email}
-									</td>
-									<td className="px-6 py-4">
-										<Badge label={user.role} />
-									</td>
-									<td className="px-6 py-4 text-sm text-gray-900">
-										{user.division ?? "-"}
-									</td>
-									<td className="px-6 py-4 text-sm text-gray-900">
-										{user.camp?.name ?? "-"}
-									</td>
-									<td className="px-6 py-4 text-sm">
-										<button
-											onClick={() =>
-												handleDelete(user.id)
-											}
-											className="text-red-600 hover:underline"
-										>
-											Hapus
-										</button>
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-			)}
-
-			<Modal
-				isOpen={showModal}
-				onClose={() => setShowModal(false)}
-				title="Tambah Pengguna"
-			>
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						handleCreate();
-					}}
-					className="space-y-3"
-				>
-					<FormField
-						label="Nama"
-						value={formData.name}
-						onChange={(v) =>
-							setFormData({ ...formData, name: v })
-						}
-						required
-					/>
-					<FormField
-						label="Email"
-						type="email"
-						value={formData.email}
-						onChange={(v) =>
-							setFormData({ ...formData, email: v })
-						}
-						required
-					/>
-					<FormField
-						label="Password"
-						type="password"
-						value={formData.password}
-						onChange={(v) =>
-							setFormData({ ...formData, password: v })
-						}
-						required
-					/>
-					<FormSelect
-						label="Peran"
-						value={formData.role}
-						onChange={(v) =>
-							setFormData({ ...formData, role: v })
-						}
-						options={[
-							{ value: "SUPER_ADMIN", label: "Super Admin" },
-							{ value: "MANAGER", label: "Manager" },
-							{ value: "FIELD_OFFICER", label: "Field Officer" },
-						]}
-					/>
-					<FormSelect
-						label="Divisi"
-						value={formData.division}
-						onChange={(v) =>
-							setFormData({ ...formData, division: v })
-						}
-						options={[
-							{ value: "LOGISTICS", label: "Logistik" },
-							{ value: "SHELTER", label: "Shelter" },
-							{ value: "DATA_REGISTRATION", label: "Data Registration" },
-						]}
-					/>
-					<FormField
-						label="Camp ID"
-						value={formData.campId}
-						onChange={(v) =>
-							setFormData({ ...formData, campId: v })
-						}
-						placeholder="ID posko (opsional untuk SUPER_ADMIN)"
-					/>
-					<div className="flex gap-2 justify-end mt-4">
-						<Button
-							type="button"
-							variant="secondary"
-							onClick={() => setShowModal(false)}
-						>
-							Batal
-						</Button>
-						<Button type="submit">Simpan</Button>
-					</div>
-				</form>
-			</Modal>
-		</div>
-	);
+	return <div className="space-y-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><div className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-600">Organisasi posko</div><h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">Pengguna & struktur tim</h1><p className="mt-2 text-sm text-slate-500">{canManageStructure ? "Tetapkan manager posko, ketua tiap divisi, lalu tambahkan petugas." : "Kelola anggota tim pada posko Anda."}</p></div>{canManageStructure && <Button onClick={() => { setForm(initialForm); setFormOpen(true); }}>Tambah pengguna</Button>}</div>{error && <Alert type="error">{error}</Alert>}
+		{canManageStructure && <section className="space-y-3"><div><h2 className="text-lg font-bold text-slate-950">Struktur penanggung jawab posko</h2><p className="text-xs text-slate-500">Satu manager per posko dan satu ketua untuk setiap divisi.</p></div><div className="grid gap-4 xl:grid-cols-2">{camps.map((camp) => <div key={camp.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-slate-950">{camp.name}</h3><p className="mt-1 text-xs text-slate-500">Manager bertanggung jawab atas keseluruhan posko</p></div>{canManageStructure && <Button variant="secondary" className="px-3 py-1.5" onClick={() => setAssignmentCamp(camp)}>Atur struktur</Button>}</div><div className="mt-4 rounded-xl bg-blue-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Manager posko</p><p className="mt-1 text-sm font-semibold text-slate-900">{camp.manager?.name ?? "Belum ditetapkan"}</p></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{divisions.map((division) => <div key={division.value} className="rounded-xl border border-slate-100 p-3"><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{division.label}</p><p className="mt-1 text-sm font-semibold text-slate-800">{camp.divisionHeads.find((head) => head.division === division.value)?.user.name ?? "Belum ditetapkan"}</p><p className="mt-1 text-[11px] text-slate-500">{users.filter((user) => user.campId === camp.id && user.division === division.value && user.role === "FIELD_OFFICER").length} petugas</p></div>)}</div></div>)}</div></section>}
+		<section className="space-y-3"><div><h2 className="text-lg font-bold text-slate-950">Semua akun</h2><p className="text-xs text-slate-500">Struktur: Super Admin → Manager → Ketua Divisi → Field Officer.</p></div><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="min-w-full divide-y divide-slate-200"><thead className="bg-slate-50"><tr>{["Nama", "Email", "Jabatan", "Divisi", "Posko", "Aksi"].map((item) => <th key={item} className="whitespace-nowrap px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">{item}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{users.map((user) => <tr key={user.id} className="hover:bg-slate-50"><td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900"><button type="button" className="text-left hover:text-blue-600 hover:underline" onClick={() => router.push(`/users/${user.id}`)}>{user.name}</button></td><td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">{user.email}</td><td className="px-5 py-4"><Badge label={user.role} /></td><td className="px-5 py-4 text-sm text-slate-600">{user.division ?? "Semua divisi"}</td><td className="px-5 py-4 text-sm text-slate-600">{user.camp?.name ?? "Global"}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-2"><Button variant="ghost" className="px-3 py-1.5" disabled={busy} onClick={() => router.push(`/users/${user.id}`)}>Detail</Button><Button variant="secondary" className="px-3 py-1.5" disabled={busy} onClick={() => router.push(`/users/${user.id}/edit`)}>Edit</Button>{canManageStructure && user.role !== "SUPER_ADMIN" && <Button variant="danger" className="px-3 py-1.5" disabled={busy} onClick={() => deleteUser(user)}>Hapus</Button>}</div></td></tr>)}{!loading && users.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-500">Belum ada pengguna.</td></tr>}</tbody></table></div></div></section>
+		{canManageStructure && <Modal isOpen={formOpen} onClose={() => !busy && setFormOpen(false)} title="Tambah pengguna"><form onSubmit={submitUser}><FormField label="Nama" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required /><FormField label="Email" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} required /><FormField label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} required /><FormSelect label="Jabatan" value={form.role} onChange={(role) => setForm({ ...form, role, division: role === "MANAGER" || role === "SUPER_ADMIN" ? "" : form.division, campId: role === "SUPER_ADMIN" ? "" : form.campId })} options={[{ value: "MANAGER", label: "Manager posko" }, { value: "DIVISION_HEAD", label: "Ketua divisi" }, { value: "FIELD_OFFICER", label: "Field Officer" }, { value: "SUPER_ADMIN", label: "Super Admin" }]} required />{form.role !== "SUPER_ADMIN" && <FormSelect label="Posko" value={form.campId} onChange={(campId) => setForm({ ...form, campId })} options={[{ value: "", label: "Pilih posko" }, ...camps.map((camp) => ({ value: camp.id, label: camp.name }))]} required />}{form.role !== "SUPER_ADMIN" && form.role !== "MANAGER" && <FormSelect label="Divisi" value={form.division} onChange={(division) => setForm({ ...form, division })} options={[{ value: "", label: "Pilih divisi" }, ...divisions]} required />}{form.role === "MANAGER" && <Alert type="info">Manager bertanggung jawab atas semua divisi pada posko yang dipilih. Setiap posko hanya memiliki satu manager.</Alert>}{form.role === "DIVISION_HEAD" && <Alert type="info">Setiap divisi pada satu posko hanya memiliki satu ketua.</Alert>}<div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setFormOpen(false)} disabled={busy}>Batal</Button><Button type="submit" disabled={busy}>{busy ? "Menyimpan..." : "Simpan"}</Button></div></form></Modal>}
+		<Modal isOpen={Boolean(selectedCamp)} onClose={() => setAssignmentCamp(null)} title={`Struktur ${selectedCamp?.name ?? "posko"}`}>{selectedCamp && <div className="space-y-3"><FormSelect label="Manager posko" value={selectedCamp.managerId ?? ""} onChange={(id) => assignManager(selectedCamp, id)} options={[{ value: "", label: "Belum ditetapkan" }, ...managerCandidates.map((user) => ({ value: user.id, label: user.name }))]} /><div className="border-t border-slate-100 pt-3"><p className="mb-3 text-sm font-bold text-slate-800">Ketua divisi</p>{divisions.map((division) => { const head = selectedCamp.divisionHeads.find((item) => item.division === division.value); return <FormSelect key={division.value} label={division.label} value={head?.user.id ?? ""} onChange={(id) => assignHead(selectedCamp, division.value, id)} options={[{ value: "", label: "Belum ditetapkan" }, ...headCandidates(division.value).map((user) => ({ value: user.id, label: user.name }))]} />; })}</div><p className="text-xs text-slate-500">Tetapkan pengguna dengan jabatan yang sesuai pada posko dan divisi tersebut terlebih dahulu.</p></div>}</Modal>
+	</div>;
 }

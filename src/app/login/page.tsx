@@ -8,33 +8,43 @@ import { Alert } from "@/components/ui/alert";
 
 export default function LoginPage() {
 	const router = useRouter();
+
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
 
-	const handleSubmit = async (e: React.FormEvent) => {
+	const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
+
+		if (loading) return;
+
 		setError("");
 		setLoading(true);
 
 		try {
 			const res = await fetch("/api/auth/login", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ email, password }),
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					email: email.trim(),
+					password,
+				}),
 			});
 
 			const data = await res.json();
 
-			if (data.success) {
-				router.push("/dashboard");
-				router.refresh();
-			} else {
-				setError(data.message ?? "Login gagal");
+			if (!res.ok || !data.success) {
+				setError(data.message ?? "Email atau password salah.");
+				return;
 			}
+
+			router.push("/dashboard");
+			router.refresh();
 		} catch {
-			setError("Terjadi kesalahan");
+			setError("Terjadi kesalahan. Silakan coba lagi.");
 		} finally {
 			setLoading(false);
 		}
@@ -42,43 +52,55 @@ export default function LoginPage() {
 
 	return (
 		<AuthLayout>
-			<h1 className="text-2xl font-bold text-center mb-6 text-gray-900">
-				Masuk ke Siaga Bencana
-			</h1>
+			<div className="mb-8">
+				<div className="mb-6 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl font-bold text-white lg:hidden">S</div>
+				<h1 className="text-2xl font-bold tracking-tight text-slate-950">Selamat datang kembali</h1>
+				<p className="mt-2 text-sm leading-6 text-slate-500">Masuk untuk melanjutkan ke command center Siaga Bencana.</p>
+			</div>
+
 			<form onSubmit={handleSubmit} className="space-y-4">
-				{error && (
-					<Alert type="error">{error}</Alert>
-				)}
+				{error && <Alert type="error">{error}</Alert>}
+
 				<div>
-					<label className="block text-sm font-medium text-gray-700 mb-1">
-						Email
-					</label>
+					<label htmlFor="email" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Email</label>
+
 					<input
+						id="email"
+						name="email"
 						type="email"
 						value={email}
 						onChange={(e) => setEmail(e.target.value)}
-						className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						autoComplete="email"
+						placeholder="nama@email.com"
+						className="min-h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+						disabled={loading}
 						required
 					/>
 				</div>
+
 				<div>
-					<label className="block text-sm font-medium text-gray-700 mb-1">
-						Password
-					</label>
+					<label htmlFor="password" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Password</label>
+
 					<input
+						id="password"
+						name="password"
 						type="password"
 						value={password}
 						onChange={(e) => setPassword(e.target.value)}
-						className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						autoComplete="current-password"
+						placeholder="Masukkan password"
+						className="min-h-11 w-full rounded-xl border border-slate-200 px-3.5 text-sm shadow-sm transition focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+						disabled={loading}
 						required
 					/>
 				</div>
+
 				<Button
 					type="submit"
 					className="w-full"
 					disabled={loading}
 				>
-					{loading ? "Memasuk..." : "Masuk"}
+					{loading ? "Memuat..." : "Masuk"}
 				</Button>
 			</form>
 		</AuthLayout>
