@@ -15,6 +15,7 @@ export type MapCamp = {
 	currentOccupants: number;
 	occupancyPercentage: number;
 	status: string;
+	availability?: "AVAILABLE" | "LIMITED" | "FULL";
 };
 
 function createIcon(color: string) {
@@ -25,6 +26,10 @@ function createIcon(color: string) {
 		iconAnchor: [9, 18],
 		popupAnchor: [0, -16],
 	});
+}
+
+function escapeHtml(value: string) {
+	return value.replace(/[&<>'\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" })[character] ?? character);
 }
 
 export function CampMap({
@@ -57,7 +62,7 @@ export function CampMap({
 		const container = containerRef.current;
 		if (!container || mapRef.current) return;
 
-		const map = L.map(container, { scrollWheelZoom: true });
+		const map = L.map(container, { scrollWheelZoom: false, keyboard: true });
 		const layer = L.layerGroup().addTo(map);
 
 		L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -93,6 +98,8 @@ export function CampMap({
 
 		layer.clearLayers();
 		markersRef.current = {};
+		containerRef.current?.setAttribute("role", "region");
+		containerRef.current?.setAttribute("aria-label", "Peta lokasi posko evakuasi. Gunakan daftar posko sebagai alternatif navigasi.");
 
 		camps.forEach((camp) => {
 			if (!mapRef.current || !layerRef.current) return;
@@ -104,19 +111,20 @@ export function CampMap({
 
 			marker.bindPopup(`
 				<div style="min-width:200px">
-					<strong>${camp.name}</strong>
-					<p style="margin:4px 0;color:#555">${camp.address}</p>
+					<strong>${escapeHtml(camp.name)}</strong>
+					<p style="margin:4px 0;color:#555">${escapeHtml(camp.address)}</p>
 					<p style="margin:4px 0">
 						Okupansi: ${camp.currentOccupants}/${camp.maxCapacity}
 						(${camp.occupancyPercentage}%)
 					</p>
 					${popupExtraRef.current?.(camp) ?? ""}
 					<p style="margin:4px 0;color:${color};font-weight:600">
-						${camp.status}
+						${escapeHtml(camp.status)}
 					</p>
 				</div>
 			`);
 
+			marker.options.title = `${camp.name}. Okupansi ${camp.occupancyPercentage} persen.`;
 			marker.on("click", () => {
 				if (mapRef.current === map) onSelectRef.current?.(camp.id);
 			});

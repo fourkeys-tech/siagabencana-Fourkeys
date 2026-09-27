@@ -12,7 +12,7 @@ export function Alert({
 		warning: "bg-yellow-50 border-yellow-200 text-yellow-800",
 	};
 	return (
-		<div className={`p-4 rounded-lg border ${styles[type]}`}>
+		<div role={type === "error" || type === "warning" ? "alert" : "status"} aria-live={type === "error" || type === "warning" ? "assertive" : "polite"} className={`p-4 rounded-lg border ${styles[type]}`}>
 			{children}
 		</div>
 	);

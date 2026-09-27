@@ -1,18 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "@/components/auth/user-provider";
 import { Button } from "@/components/ui/button";
 import { AuthLayout } from "@/components/layout/auth-layout";
 import { Alert } from "@/components/ui/alert";
 
 export default function LoginPage() {
 	const router = useRouter();
+	const searchParams = useSearchParams();
+	const { user, loading: sessionLoading, status } = useSession();
+	const returnTo = searchParams.get("returnTo") || "/dashboard";
 
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [error, setError] = useState("");
 	const [loading, setLoading] = useState(false);
+
+	useEffect(() => {
+		if (!sessionLoading && status === "authenticated" && user) router.replace(returnTo.startsWith("/") ? returnTo : "/dashboard");
+	}, [returnTo, router, sessionLoading, status, user]);
 
 	const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
@@ -41,7 +49,7 @@ export default function LoginPage() {
 				return;
 			}
 
-			router.push("/dashboard");
+			router.push(returnTo.startsWith("/") ? returnTo : "/dashboard");
 			router.refresh();
 		} catch {
 			setError("Terjadi kesalahan. Silakan coba lagi.");
@@ -59,7 +67,7 @@ export default function LoginPage() {
 			</div>
 
 			<form onSubmit={handleSubmit} className="space-y-4">
-				{error && <Alert type="error">{error}</Alert>}
+				{error && <div id="login-error" role="alert"><Alert type="error">{error}</Alert></div>}
 
 				<div>
 					<label htmlFor="email" className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-600">Email</label>
@@ -98,7 +106,7 @@ export default function LoginPage() {
 				<Button
 					type="submit"
 					className="w-full"
-					disabled={loading}
+					disabled={loading || sessionLoading}
 				>
 					{loading ? "Memuat..." : "Masuk"}
 				</Button>

@@ -9,42 +9,63 @@ import {
 } from "react";
 import type { SessionUser } from "@/lib/navigation";
 
+type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "error";
+
 type AuthContextValue = {
 	user: SessionUser | null;
 	loading: boolean;
+	status: AuthStatus;
 	refresh: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue>({
 	user: null,
 	loading: true,
+	status: "loading",
 	refresh: async () => {},
 });
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
 	const [user, setUser] = useState<SessionUser | null>(null);
+	const [status, setStatus] = useState<AuthStatus>("loading");
 	const [loading, setLoading] = useState(true);
 
-	const refresh = useCallback(() => {
-		return fetch("/api/auth/me", { cache: "no-store" })
-			.then((res) => (res.ok ? res.json() : null))
-			.then((data) => {
-				setUser(data?.success && data.user ? data.user : null);
-			})
-			.catch(() => {
+	const refresh = useCallback(async () => {
+		try {
+			const response = await fetch("/api/auth/me", { cache: "no-store" });
+			if (response.status === 401) {
 				setUser(null);
-			})
-			.finally(() => {
-				setLoading(false);
-			});
+				setStatus("unauthenticated");
+				return;
+			}
+			if (!response.ok) {
+				setStatus((current) => current === "authenticated" ? current : "error");
+				return;
+			}
+			const data = await response.json();
+			if (data?.success && data.user) {
+				setUser(data.user);
+				setStatus("authenticated");
+			} else {
+				setUser(null);
+				setStatus("unauthenticated");
+			}
+		} catch {
+			setStatus((current) => current === "authenticated" ? current : "error");
+		} finally {
+			setLoading(false);
+		}
 	}, []);
 
 	useEffect(() => {
-		refresh();
+		const timer = window.setTimeout(() => {
+			void refresh();
+		}, 0);
+		return () => window.clearTimeout(timer);
 	}, [refresh]);
 
 	return (
-		<AuthContext.Provider value={{ user, loading, refresh }}>
+		<AuthContext.Provider value={{ user, loading, status, refresh }}>
 			{children}
 		</AuthContext.Provider>
 	);

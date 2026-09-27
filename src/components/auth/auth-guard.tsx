@@ -10,22 +10,18 @@ import { Alert } from "@/components/ui/alert";
 export function AuthGuard({ children }: { children: React.ReactNode }) {
 	const router = useRouter();
 	const pathname = usePathname();
-	const { user, loading, refresh } = useSession();
+	const { user, loading, status } = useSession();
 
 	useEffect(() => {
-		refresh();
-	}, [pathname, refresh]);
-
-	useEffect(() => {
-		if (!loading && !user) {
-			router.replace("/login");
+		if (!loading && status === "unauthenticated") {
+			router.replace(`/login?returnTo=${encodeURIComponent(pathname)}`);
 		}
-	}, [loading, user, router]);
+	}, [loading, status, pathname, router]);
 
-	if (loading || !user) {
+	if (loading || status === "error" || !user) {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
-				<span className="text-gray-500">Memuat...</span>
+				<span className="text-gray-500" aria-live="polite">Memuat sesi...</span>
 			</div>
 		);
 	}

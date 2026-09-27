@@ -14,7 +14,7 @@
 @theme inline {
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
-	--font-sans: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+	--font-sans: "Plus Jakarta Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: "SFMono-Regular", Consolas, monospace;
 }
 
@@ -28,6 +28,21 @@ html {
 	scroll-behavior: smooth;
 }
 
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
+
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		scroll-behavior: auto !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
 html,
 body {
 	min-height: 100%;
@@ -37,8 +52,8 @@ body {
 	margin: 0;
 	background: var(--background);
 	color: var(--foreground);
-	font-family: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-	font-size: 14px;
+	font-family: "Plus Jakarta Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+	font-size: 15px;
 	-webkit-font-smoothing: antialiased;
 }
 
@@ -58,12 +73,12 @@ button:disabled {
 }
 
 :focus-visible {
-	outline: 3px solid rgb(23 105 224 / 28%);
-	outline-offset: 2px;
+	outline: 3px solid #1d4ed8;
+	outline-offset: 3px;
 }
 
 ::placeholder {
-	color: #9aa6b8;
+	color: #64748b;
 }
 
 ::-webkit-scrollbar {

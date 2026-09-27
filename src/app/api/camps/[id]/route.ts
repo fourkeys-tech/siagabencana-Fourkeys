@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
+import { campValidationMessage, parseCampInput } from "@/lib/camp-validation";
 
 type Params = {
     params: Promise<{
@@ -88,29 +89,24 @@ export async function PUT(
             );
         }
 
-        const camp = await prisma.camp.update({
-            where: { id },
-            data: {
-                ...(body.name !== undefined && {
-                    name: String(body.name).trim(),
-                }),
-                ...(body.address !== undefined && {
-                    address: String(body.address).trim(),
-                }),
-                ...(body.latitude !== undefined && {
-                    latitude: Number(body.latitude),
-                }),
-                ...(body.longitude !== undefined && {
-                    longitude: Number(body.longitude),
-                }),
-                ...(body.maxCapacity !== undefined && {
-                    maxCapacity: Number(body.maxCapacity),
-                }),
-                ...(body.status !== undefined && {
-                    status: body.status,
-                }),
-            },
-        });
+		let campInput;
+		try {
+			campInput = parseCampInput({
+				name: body.name ?? existingCamp.name,
+				address: body.address ?? existingCamp.address,
+				latitude: body.latitude ?? existingCamp.latitude,
+				longitude: body.longitude ?? existingCamp.longitude,
+				maxCapacity: body.maxCapacity ?? existingCamp.maxCapacity,
+				status: body.status ?? existingCamp.status,
+			}, existingCamp.currentOccupants);
+		} catch (validationError) {
+			return NextResponse.json({ success: false, message: campValidationMessage(validationError) ?? "Data posko tidak valid." }, { status: 400 });
+		}
+
+		const camp = await prisma.camp.update({
+			where: { id },
+			data: campInput,
+		});
 
         return NextResponse.json({
             success: true,

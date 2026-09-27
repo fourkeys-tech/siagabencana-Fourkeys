@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import Link from "next/link";
+import type { MapCamp } from "@/components/public/camp-map";
+
+const CampMap = dynamic(() => import("@/components/public/camp-map").then((module) => module.CampMap), { ssr: false, loading: () => <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500">Memuat peta...</div> });
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -94,7 +98,9 @@ export default function CampDetailPage() {
 				</div>
 			</div>
 
-			<div className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
+			<div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+				<div className="h-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><CampMap camps={[{ id: camp.id, name: camp.name, address: camp.address, latitude: camp.latitude, longitude: camp.longitude, maxCapacity: camp.maxCapacity, currentOccupants: camp.currentOccupants, occupancyPercentage: camp.maxCapacity > 0 ? Number(((camp.currentOccupants / camp.maxCapacity) * 100).toFixed(2)) : 0, status: camp.status } satisfies MapCamp]} activeId={camp.id} /></div>
+				<div className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
 				<div>
 					<p className="text-sm font-medium text-gray-500">Nama</p>
 					<p className="text-gray-900">{camp.name}</p>
@@ -135,6 +141,7 @@ export default function CampDetailPage() {
 						{new Date(camp.updatedAt).toLocaleString("id-ID")}
 					</p>
 				</div>
+			</div>
 			</div>
 		</div>
 	);

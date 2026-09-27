@@ -14,27 +14,12 @@ export function LayoutWrapper({
 	children: React.ReactNode;
 }) {
 	const pathname = usePathname();
+	const isPublic = pathname === "/" || publicRoutes.some((route) => pathname.startsWith(route));
+	const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
 
-	// Landing page dan halaman publik
-	if (
-		pathname === "/" ||
-		publicRoutes.some((route) => pathname.startsWith(route))
-	) {
-		return <>{children}</>;
-	}
-
-	// Halaman login
-	// LoginPage sendiri sudah menggunakan AuthLayout
-	if (authRoutes.some((route) => pathname.startsWith(route))) {
-		return <>{children}</>;
-	}
-
-	// Semua halaman lainnya membutuhkan autentikasi
 	return (
 		<UserProvider>
-			<AuthGuard>
-				<AppLayout>{children}</AppLayout>
-			</AuthGuard>
+			{isPublic || isAuthRoute ? children : <AuthGuard><AppLayout>{children}</AppLayout></AuthGuard>}
 		</UserProvider>
 	);
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
+import { campValidationMessage, parseCampInput } from "@/lib/camp-validation";
 
 export async function GET() {
 	try {
@@ -34,15 +35,13 @@ export async function POST(request: Request) {
 	try {
 		await requireRole("SUPER_ADMIN");
 		const body = await request.json();
-		const name = String(body.name ?? "").trim();
-		const address = String(body.address ?? "").trim();
-		const latitude = Number(body.latitude);
-		const longitude = Number(body.longitude);
-		const maxCapacity = Number(body.maxCapacity);
-		if (!name || !address || !Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isInteger(maxCapacity) || maxCapacity <= 0) {
-			return NextResponse.json({ success: false, message: "Nama, alamat, koordinat valid, dan kapasitas positif wajib diisi." }, { status: 400 });
+		let campInput;
+		try {
+			campInput = parseCampInput({ ...body, status: body.status ?? "ACTIVE" });
+		} catch (validationError) {
+			return NextResponse.json({ success: false, message: campValidationMessage(validationError) ?? "Data posko tidak valid." }, { status: 400 });
 		}
-		const camp = await prisma.camp.create({ data: { name, address, latitude, longitude, maxCapacity } });
+		const camp = await prisma.camp.create({ data: campInput });
 		return NextResponse.json({ success: true, message: "Posko berhasil dibuat. Tetapkan manager dan kepala divisi melalui Manajemen Pengguna.", data: camp }, { status: 201 });
 	} catch (error) {
 		if (isAuthError(error)) return authError(error, "Hanya Super Admin yang dapat membuat posko.");

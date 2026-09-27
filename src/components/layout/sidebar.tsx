@@ -40,21 +40,21 @@ export function Sidebar({
 
 	return (
 		<>
-			{mobileOpen && <button aria-label="Tutup menu" onClick={onClose} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
-			<aside className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+			{mobileOpen && <button type="button" aria-label="Tutup menu navigasi" onClick={onClose} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
+			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
 				<div className="flex h-20 items-center justify-between border-b border-white/10 px-6">
 					<Link href="/dashboard" onClick={onClose} className="flex items-center gap-3">
 						<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500 text-lg font-bold shadow-lg shadow-blue-950/30">S</div>
 						<div><p className="text-[15px] font-bold tracking-tight">Siaga Bencana</p><p className="mt-0.5 text-[11px] text-slate-400">Manajemen operasional</p></div>
 					</Link>
-					<button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden"><X size={19} /></button>
+					<button type="button" onClick={onClose} aria-label="Tutup menu navigasi" className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white focus-visible:ring-4 focus-visible:ring-blue-400/40 lg:hidden"><X size={19} aria-hidden="true" /></button>
 				</div>
 
-				<nav className="flex-1 space-y-7 overflow-y-auto px-4 py-6">
+				<nav aria-label="Menu aplikasi" className="flex-1 space-y-7 overflow-y-auto px-4 py-6">
 					{sections.map((section) => <div key={section.id}><p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{section.label}</p><ul className="space-y-1">{section.items.map((item) => {
 						const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
 						if (item.disabled) return <li key={item.href}><span className="flex items-center justify-between rounded-xl px-3 py-2.5 text-[13px] font-medium text-slate-600">{item.label}<span className="rounded-full bg-white/5 px-2 py-0.5 text-[9px] uppercase tracking-wider text-slate-500">Segera</span></span></li>;
-						return <li key={item.href}><Link href={item.href} onClick={onClose} className={`flex items-center rounded-xl px-3 py-2.5 text-[13px] font-semibold transition ${active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/8 hover:text-white"}`}><span className={`mr-3 h-1.5 w-1.5 rounded-full ${active ? "bg-white" : "bg-slate-600"}`} />{item.label}</Link></li>;
+						return <li key={item.href}><Link href={item.href} onClick={onClose} aria-current={active ? "page" : undefined} className={`flex items-center rounded-xl px-3 py-2.5 text-[13px] font-semibold transition focus-visible:ring-4 focus-visible:ring-blue-400/40 ${active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/8 hover:text-white"}`}><span className={`mr-3 h-1.5 w-1.5 rounded-full ${active ? "bg-white" : "bg-slate-600"}`} />{item.label}</Link></li>;
 					})}</ul></div>)}
 				</nav>
 

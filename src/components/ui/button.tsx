@@ -13,7 +13,7 @@ export function Button({
 	type?: "button" | "submit";
 	disabled?: boolean;
 }) {
-	const base = "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+	const base = "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-500/30 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 	const variants = {
 		primary: "bg-[var(--primary)] text-white shadow-sm shadow-blue-200 hover:bg-[var(--primary-dark)]",
 		secondary: "border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-slate-300 hover:bg-slate-50",
