@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/components/auth/user-provider";
 import { Button } from "@/components/ui/button";
 import { AuthLayout } from "@/components/layout/auth-layout";
 import { Alert } from "@/components/ui/alert";
 
-export default function LoginPage() {
+function LoginForm() {
 	const router = useRouter();
 	const searchParams = useSearchParams();
-	const { user, loading: sessionLoading, status } = useSession();
+	const { user, loading: sessionLoading, status, refresh } = useSession();
 	const returnTo = searchParams.get("returnTo") || "/dashboard";
 
 	const [email, setEmail] = useState("");
@@ -49,8 +49,8 @@ export default function LoginPage() {
 				return;
 			}
 
-			router.push(returnTo.startsWith("/") ? returnTo : "/dashboard");
-			router.refresh();
+			await refresh();
+			router.replace(returnTo.startsWith("/") ? returnTo : "/dashboard");
 		} catch {
 			setError("Terjadi kesalahan. Silakan coba lagi.");
 		} finally {
@@ -112,5 +112,13 @@ export default function LoginPage() {
 				</Button>
 			</form>
 		</AuthLayout>
+	);
+}
+
+export default function LoginPage() {
+	return (
+		<Suspense fallback={<AuthLayout><div className="min-h-[24rem]" /></AuthLayout>}>
+			<LoginForm />
+		</Suspense>
 	);
 }

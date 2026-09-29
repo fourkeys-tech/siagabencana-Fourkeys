@@ -3,8 +3,8 @@ import "./globals.css";
 import { LayoutWrapper } from "@/components/layout/layout-wrapper";
 
 export const metadata: Metadata = {
-	title: "SIANA | Sistem Informasi Manajemen Bencana",
-	description: "Informasi publik posko evakuasi, kapasitas, fasilitas, dan bantuan bencana di Sidoarjo.",
+	title: "SIANA - Sistem Informasi dan Manajemen Bencana",
+	description: "Informasi publik posko evakuasi, kapasitas, fasilitas, dan bantuan bencana.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

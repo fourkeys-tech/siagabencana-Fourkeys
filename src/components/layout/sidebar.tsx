@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -41,13 +42,32 @@ export function Sidebar({
 	return (
 		<>
 			{mobileOpen && <button type="button" aria-label="Tutup menu navigasi" onClick={onClose} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
-			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
-				<div className="flex h-20 items-center justify-between border-b border-white/10 px-6">
-					<Link href="/dashboard" onClick={onClose} className="flex items-center gap-3">
-						<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500 text-lg font-bold shadow-lg shadow-blue-950/30">S</div>
-						<div><p className="text-[15px] font-bold tracking-tight">Siaga Bencana</p><p className="mt-0.5 text-[11px] text-slate-400">Manajemen operasional</p></div>
+			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,20rem)] flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:w-72 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
+				<div className="flex h-20 w-full items-center border-b border-white/10 px-5 overflow-hidden">
+					<Link
+						href="/dashboard"
+						onClick={onClose}
+						aria-label="Buka dashboard Siaga Bencana"
+						className="flex min-w-0 w-full items-center overflow-hidden rounded-md focus-visible:ring-4 focus-visible:ring-blue-400/40"
+					>
+						<Image
+							src="/sidebar.svg"
+							alt="Fourkeys Siaga Bencana"
+							width={220}
+							height={70}
+							priority
+							className="block h-auto w-[220px] max-w-full object-contain object-left"
+						/>
 					</Link>
-					<button type="button" onClick={onClose} aria-label="Tutup menu navigasi" className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white focus-visible:ring-4 focus-visible:ring-blue-400/40 lg:hidden"><X size={19} aria-hidden="true" /></button>
+
+					<button
+						type="button"
+						onClick={onClose}
+						aria-label="Tutup menu navigasi"
+						className="ml-2 shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white focus-visible:ring-4 focus-visible:ring-blue-400/40 lg:hidden"
+					>
+						<X size={19} aria-hidden="true" />
+					</button>
 				</div>
 
 				<nav aria-label="Menu aplikasi" className="flex-1 space-y-7 overflow-y-auto px-4 py-6">

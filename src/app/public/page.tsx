@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "@/components/auth/user-provider";
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { occupancyBarClass } from "@/lib/occupancy";
 
@@ -51,7 +52,9 @@ type Summary = {
 type Filter = "ALL" | "AVAILABLE" | "LIMITED" | "FULL";
 type Sort = "AVAILABILITY" | "NAME" | "OCCUPANCY";
 
-const CampMap = dynamic(
+export const dynamic = "force-dynamic";
+
+const CampMap = nextDynamic(
 	() => import("@/components/public/camp-map").then((mod) => mod.CampMap),
 	{
 		ssr: false,
@@ -167,9 +170,10 @@ export default function PublicPage() {
 			<a href="#konten-utama" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-blue-700 focus:shadow-xl">Lewati ke konten utama</a>
 			<header className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_#3b82f6,_transparent_42%),linear-gradient(135deg,#0f3f91,#071d49)] text-white">
 				<div className="mx-auto max-w-7xl px-5 py-5 sm:px-8">
-					<div className="flex flex-wrap items-center justify-between gap-4">
-						<div><p className="text-sm font-semibold tracking-wide text-blue-200">SIANA • INFORMASI PUBLIK</p><p className="mt-1 text-xl font-bold">Siaga Bencana</p></div>
-						<Link href={user ? "/dashboard" : "/login"} aria-label={user ? "Buka dashboard" : "Masuk ke dashboard"} className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-blue-800 shadow-sm transition hover:bg-blue-50 focus-visible:ring-4 focus-visible:ring-white/50">{sessionLoading ? "Memeriksa sesi..." : user ? "Buka Dashboard" : "Masuk ke Dashboard"}</Link>
+					<div className="grid min-h-20 grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr] sm:gap-6">
+						<div className="hidden sm:block" />
+						<Link href="/public" aria-label="Fourkeys Siaga Bencana" className="mx-auto rounded-xl focus-visible:ring-4 focus-visible:ring-white/50"><Image src="/logo.svg" alt="Fourkeys Siaga Bencana" width={520} height={150} priority className="h-auto w-[min(82vw,22rem)] object-contain sm:w-[min(40vw,32rem)]" /></Link>
+						<div className="flex justify-center sm:justify-end"><Link href={user ? "/dashboard" : "/login"} aria-label={user ? "Buka dashboard" : "Masuk ke dashboard"} className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-blue-800 shadow-sm transition hover:bg-blue-50 focus-visible:ring-4 focus-visible:ring-white/50 sm:px-4 sm:py-2.5 sm:text-sm">{sessionLoading ? "Memeriksa sesi..." : user ? "Buka Dashboard" : "Masuk ke Dashboard"}</Link></div>
 					</div>
 					<div className="grid gap-10 py-14 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
 						<div><span className="inline-flex rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-blue-100 ring-1 ring-white/20">Informasi kapasitas posko untuk masyarakat</span><h1 id="public-heading" className="mt-5 max-w-3xl text-4xl font-black leading-tight sm:text-5xl lg:text-6xl">Temukan posko evakuasi yang masih siap menerima.</h1><p className="mt-5 max-w-2xl text-base leading-7 text-blue-100 sm:text-lg">Gunakan peta dan daftar posko di bawah untuk melihat lokasi, kapasitas tersisa, kondisi fasilitas, serta status bantuan yang tersedia.</p><a href="#daftar-posko" className="mt-7 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-bold text-blue-800 transition hover:bg-blue-50">Lihat daftar posko ↓</a></div>
@@ -190,7 +194,7 @@ export default function PublicPage() {
 					</section>
 				</>}
 			</main>
-			<footer className="border-t border-slate-200 bg-white"><div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-7 text-sm text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between"><p>Informasi ini diperbarui oleh petugas lapangan. Dalam keadaan darurat, ikuti arahan petugas setempat.</p><Link href="/login" className="font-bold text-blue-600 hover:underline">Masuk ke Dashboard →</Link></div></footer>
+			<footer className="border-t border-slate-200 bg-white"><div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-8 text-sm text-slate-600 sm:px-8 md:flex-row md:items-start md:justify-between"><div className="max-w-2xl space-y-2"><p>Informasi ini diperbarui oleh petugas lapangan. Dalam keadaan darurat, ikuti arahan petugas setempat.</p><p className="text-xs text-slate-500">© {new Date().getFullYear()} Fourkeys Technology. Seluruh hak cipta dilindungi.</p></div><div className="space-y-2 md:max-w-xs md:text-right"><p className="font-bold text-slate-900">Butuh solusi digital untuk organisasi Anda?</p><p className="text-xs leading-5 text-slate-500">Fourkeys Technology menyediakan pengembangan aplikasi dan sistem informasi yang rapi, aman, dan mudah digunakan.</p><Link href={user ? "/dashboard" : "/login"} className="inline-flex font-bold text-blue-700 hover:text-blue-900 hover:underline focus-visible:ring-4 focus-visible:ring-blue-500/30">{user ? "Buka Dashboard →" : "Masuk ke Dashboard →"}</Link></div></div></footer>
 		</div>
 	);
 }

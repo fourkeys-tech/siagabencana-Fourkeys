@@ -1,0 +1,84 @@
+
+> siaga-bencana@0.1.0 build
+> next build
+
+Γû▓ Next.js 16.3.6 (Turbopack)
+- Environments: .env
+Γ£ô Running next.config.ts took 24ms
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 1436ms
+  Running TypeScript ...
+  Finished TypeScript in 7.2s ...
+  Collecting page data using 15 workers ...
+  Generating static pages using 15 workers (0/34) ...
+  Generating static pages using 15 workers (8/34) 
+  Generating static pages using 15 workers (16/34) 
+  Generating static pages using 15 workers (25/34) 
+Γ£ô Generating static pages using 15 workers (34/34) in 835ms
+  Finalizing page optimization ...
+
+Route (app)
+Γöî Γùï /
+Γö£ Γùï /_not-found
+Γö£ Γùï /aktivitas
+Γö£ ╞Æ /api/activity
+Γö£ ╞Æ /api/auth/login
+Γö£ ╞Æ /api/auth/logout
+Γö£ ╞Æ /api/auth/me
+Γö£ ╞Æ /api/camps
+Γö£ ╞Æ /api/camps/[id]
+Γö£ ╞Æ /api/camps/[id]/division-head
+Γö£ ╞Æ /api/camps/[id]/manager
+Γö£ ╞Æ /api/dashboard
+Γö£ ╞Æ /api/distribution
+Γö£ ╞Æ /api/distribution/[id]
+Γö£ ╞Æ /api/evacuees
+Γö£ ╞Æ /api/evacuees/[id]
+Γö£ ╞Æ /api/evacuees/[id]/checkout
+Γö£ ╞Æ /api/logistics
+Γö£ ╞Æ /api/logistics/[id]
+Γö£ ╞Æ /api/logistics/[id]/movements
+Γö£ ╞Æ /api/monitoring
+Γö£ ╞Æ /api/public/camps
+Γö£ ╞Æ /api/public/camps/[id]
+Γö£ ╞Æ /api/public/overview
+Γö£ ╞Æ /api/reports
+Γö£ ╞Æ /api/reports/sheets
+Γö£ ╞Æ /api/settings/profile
+Γö£ ╞Æ /api/settings/system
+Γö£ ╞Æ /api/shelter
+Γö£ ╞Æ /api/shelter/[id]
+Γö£ ╞Æ /api/users
+Γö£ ╞Æ /api/users/[id]
+Γö£ Γùï /dashboard
+Γö£ Γùï /distribusi
+Γö£ Γùï /icon.png
+Γö£ Γùï /kelola-posko
+Γö£ ╞Æ /kelola-posko/[id]
+Γö£ ╞Æ /kelola-posko/[id]/edit
+Γö£ Γùï /laporan
+Γö£ Γùï /login
+Γö£ Γùï /logistik
+Γö£ ╞Æ /logistik/[id]
+Γö£ ╞Æ /logistik/[id]/edit
+Γö£ Γùï /monitoring
+Γö£ Γùï /pengaturan
+Γö£ Γùï /pengungsi
+Γö£ ╞Æ /pengungsi/[id]
+Γö£ ╞Æ /pengungsi/[id]/edit
+Γö£ Γùï /peta
+Γö£ Γùï /public
+Γö£ Γùï /shelter
+Γö£ ╞Æ /shelter/[id]
+Γö£ ╞Æ /shelter/[id]/edit
+Γö£ Γùï /users
+Γö£ ╞Æ /users/[id]
+Γöö ╞Æ /users/[id]/edit
+
+
+╞Æ Proxy (Middleware)
+
+Γùï  (Static)   prerendered as static content
+╞Æ  (Dynamic)  server-rendered on demand
+
