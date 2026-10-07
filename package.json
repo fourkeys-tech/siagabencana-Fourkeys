@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "prisma skills sync || exit 0",
+    "postinstall": "prisma generate",
     "db:seed": "tsx src/lib/seed.ts"
   },
   "dependencies": {
