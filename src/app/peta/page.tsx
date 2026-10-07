@@ -82,8 +82,8 @@ export default function PetaPage() {
 
 			{error && <Alert type="error">{error}</Alert>}
 
-			<div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-				<div className="max-h-[600px] overflow-y-auto">
+			<div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+				<div className="max-h-72 min-w-0 overflow-y-auto lg:max-h-[600px]">
 					<Card className="p-0">
 						{camps.length === 0 ? (
 							<p className="p-4 text-sm text-gray-500">
@@ -140,7 +140,7 @@ export default function PetaPage() {
 					</Card>
 				</div>
 
-				<div className="h-[600px] overflow-hidden rounded-lg border bg-white">
+				<div className="h-[min(70dvh,600px)] min-h-80 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 					<CampMap
 						camps={camps}
 						activeId={activeId}

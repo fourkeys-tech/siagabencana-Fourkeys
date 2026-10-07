@@ -57,11 +57,11 @@ export async function POST(request: Request) {
             );
         }
 
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const campId =
             user.role === "SUPER_ADMIN"
-                ? body.campId
+                ? (typeof body.campId === "string" ? body.campId : "")
                 : user.campId;
 
         if (!campId || !body.facilityName || !body.description) {
@@ -85,11 +85,19 @@ export async function POST(request: Request) {
             );
         }
 
+        const status = String(body.status ?? "GOOD").toUpperCase();
+        if (!["GOOD", "DAMAGED", "REPAIRING"].includes(status)) {
+            return NextResponse.json(
+                { success: false, message: "Status fasilitas tidak valid." },
+                { status: 400 },
+            );
+        }
+
         const report = await prisma.facilityReport.create({
             data: {
                 campId,
                 facilityName: String(body.facilityName).trim(),
-                status: body.status ?? "GOOD",
+                status: status as "GOOD" | "DAMAGED" | "REPAIRING",
                 description: String(body.description).trim(),
             },
         });

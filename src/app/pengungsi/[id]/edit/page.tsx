@@ -107,14 +107,14 @@ export default function EvacueeEditPage() {
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="w-full max-w-3xl min-w-0 space-y-6">
 			<h1 className="text-2xl font-bold text-gray-900">
 				Edit Pengungsi: {evacuee.name}
 			</h1>
 
 			{error && <Alert type="error">{error}</Alert>}
 
-			<form onSubmit={handleSubmit} className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
+			<form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-4 sm:p-6">
 				<FormField
 					label="Nama Keluarga"
 					value={formData.name}
@@ -147,7 +147,7 @@ export default function EvacueeEditPage() {
 						setFormData({ ...formData, notes: v })
 					}
 				/>
-				<div className="flex justify-end gap-3 mt-6">
+				<div className="flex flex-col-reverse gap-2 pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:pt-0">
 					<Link href={`/pengungsi/${evacuee.id}`}>
 						<Button type="button" variant="secondary">
 							Batal

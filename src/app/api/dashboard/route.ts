@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 export async function GET() {
     try {
         const user = await requireAuth();
 
-        const campWhere =
-            user.role === "SUPER_ADMIN"
-                ? {}
-                : { id: user.campId! };
+        const campWhere = getAccessibleCampWhere(user);
 
         const camps = await prisma.camp.findMany({
             where: campWhere,
@@ -93,6 +90,40 @@ export async function GET() {
             }),
         ]);
 
+        const distributionRecords = campIds.length === 0
+            ? []
+            : await prisma.distribution.findMany({
+                where: {
+                    status: { in: ["RESERVED", "SHIPPED", "RECEIVED"] },
+                    OR: [
+                        { sourceCampId: { in: campIds } },
+                        { destinationCampId: { in: campIds } },
+                    ],
+                },
+                orderBy: { updatedAt: "desc" },
+                take: 50,
+                select: {
+                    id: true,
+                    itemName: true,
+                    quantity: true,
+                    unit: true,
+                    baseQuantity: true,
+                    baseUnit: true,
+                    conversionStatus: true,
+                    status: true,
+                    updatedAt: true,
+                    sourceCamp: { select: { id: true, name: true } },
+                    destinationCamp: { select: { id: true, name: true } },
+                },
+            });
+
+        const preparedDistributions = distributionRecords
+            .filter((distribution) => distribution.status === "RESERVED")
+            .slice(0, 10);
+        const shippedDistributions = distributionRecords
+            .filter((distribution) => distribution.status === "SHIPPED" || distribution.status === "RECEIVED")
+            .slice(0, 10);
+
         const totalCapacity = camps.reduce(
             (sum, camp) => sum + camp.maxCapacity,
             0,
@@ -128,6 +159,8 @@ export async function GET() {
                     damagedFacilities,
                     specialNeeds,
                     activeEvacuees,
+                    preparedDistributions,
+                    shippedDistributions,
                 },
                 camps,
             },

@@ -28,7 +28,7 @@ type CampStatusValue = "ACTIVE" | "CLOSED";
 type ItemStatusValue = "SUFFICIENT" | "LOW" | "CRITICAL" | "SPOILED_OR_DAMAGED";
 type FacilityStatusValue = "GOOD" | "DAMAGED" | "REPAIRING";
 type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" | "RECEIVED" | "CANCELLED";
-	type MovementTypeValue = "RECEIPT" | "DAMAGE" | "LOSS" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
+	type MovementTypeValue = "RECEIPT" | "DAMAGE" | "LOSS" | "RESTORE" | "DISPOSE" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
 	type CampSeed = {
 	id: string;
 	key: string;
@@ -124,6 +124,25 @@ type MovementSeed = {
 	distributionId: string | null;
 	createdAt: Date;
 };
+
+type SeedUnitMetadata = {
+	baseUnit: string;
+	unitDimension: "COUNT" | "MASS" | "VOLUME";
+	conversionFactor: number;
+	conversionStatus: "CONFIGURED" | "NEEDS_REVIEW";
+	conversionNote: string;
+};
+
+function unitMetadata(unit: string): SeedUnitMetadata {
+	const normalized = unit.trim().toLowerCase();
+	if (normalized === "kg" || normalized === "kilogram") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: 1000, conversionStatus: "CONFIGURED", conversionNote: "Konversi standar 1 kg = 1000 g." };
+	if (normalized === "g" || normalized === "gram" || normalized === "gr") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar massa." };
+	if (normalized === "l" || normalized === "liter" || normalized === "ltr") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: 1000, conversionStatus: "CONFIGURED", conversionNote: "Konversi standar 1 l = 1000 ml." };
+	if (normalized === "ml" || normalized === "mililiter" || normalized === "milliliter") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar volume." };
+	if (normalized === "unit") return { baseUnit: "unit", unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar peralatan." };
+	if (normalized === "pcs" || normalized === "pc" || normalized === "buah") return { baseUnit: "pcs", unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar barang hitung." };
+	return { baseUnit: normalized, unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "NEEDS_REVIEW", conversionNote: "Isi kemasan belum didefinisikan; konversi lintas unit diblokir." };
+}
 
 const divisions: DivisionValue[] = ["LOGISTICS", "SHELTER", "DATA_REGISTRATION"];
 
@@ -392,11 +411,13 @@ async function upsertUser(user: UserSeed, passwordHash: string) {
 }
 
 async function upsertLogisticsItem(item: LogisticsSeed) {
-	return prisma.logisticsItem.upsert({
-		where: { id: item.id },
-		update: { campId: item.campId, itemName: item.itemName, quantity: item.quantity, reservedQuantity: item.reservedQuantity, damagedQuantity: item.damagedQuantity, minimumQuantity: item.minimumQuantity, unit: item.unit, status: item.status, notes: item.notes, createdAt: dateDaysAgo(30) },
-		create: { id: item.id, campId: item.campId, itemName: item.itemName, quantity: item.quantity, reservedQuantity: item.reservedQuantity, damagedQuantity: item.damagedQuantity, minimumQuantity: item.minimumQuantity, unit: item.unit, status: item.status, notes: item.notes, createdAt: dateDaysAgo(30) },
-	});
+	const metadata = unitMetadata(item.unit);
+	const quantityBase = item.quantity * metadata.conversionFactor;
+	const reservedQuantityBase = item.reservedQuantity * metadata.conversionFactor;
+	const damagedQuantityBase = item.damagedQuantity * metadata.conversionFactor;
+	const minimumQuantityBase = item.minimumQuantity * metadata.conversionFactor;
+	const data = { campId: item.campId, itemName: item.itemName, quantity: item.quantity, reservedQuantity: item.reservedQuantity, damagedQuantity: item.damagedQuantity, minimumQuantity: item.minimumQuantity, unit: item.unit, ...metadata, quantityBase, reservedQuantityBase, damagedQuantityBase, minimumQuantityBase, status: item.status, notes: item.notes, createdAt: dateDaysAgo(30) };
+	return prisma.logisticsItem.upsert({ where: { id: item.id }, update: data, create: { id: item.id, ...data } });
 }
 
 async function upsertFacility(facility: FacilitySeed) {
@@ -416,27 +437,21 @@ async function upsertEvacuee(evacuee: EvacueeSeed) {
 }
 
 async function upsertRequest(request: RequestSeed) {
-	return prisma.logisticsRequest.upsert({
-		where: { id: request.id },
-		update: { sourceCampId: request.sourceCampId, destinationCampId: request.destinationCampId, createdById: request.createdById, reviewedById: request.reviewedById, itemName: request.itemName, quantity: request.quantity, unit: request.unit, notes: request.notes, rejectionReason: request.rejectionReason, status: request.status, createdAt: request.createdAt },
-		create: { id: request.id, sourceCampId: request.sourceCampId, destinationCampId: request.destinationCampId, createdById: request.createdById, reviewedById: request.reviewedById, itemName: request.itemName, quantity: request.quantity, unit: request.unit, notes: request.notes, rejectionReason: request.rejectionReason, status: request.status, createdAt: request.createdAt },
-	});
+	const metadata = unitMetadata(request.unit);
+	const data = { sourceCampId: request.sourceCampId, destinationCampId: request.destinationCampId, createdById: request.createdById, reviewedById: request.reviewedById, itemName: request.itemName, quantity: request.quantity, unit: request.unit, requestedQuantity: request.quantity, requestedUnit: request.unit, baseQuantity: request.quantity * metadata.conversionFactor, baseUnit: metadata.baseUnit, unitDimension: metadata.unitDimension, conversionFactor: metadata.conversionFactor, conversionStatus: metadata.conversionStatus, notes: request.notes, rejectionReason: request.rejectionReason, status: request.status, createdAt: request.createdAt };
+	return prisma.logisticsRequest.upsert({ where: { id: request.id }, update: data, create: { id: request.id, ...data } });
 }
 
 async function upsertDistribution(distribution: DistributionSeed) {
-	return prisma.distribution.upsert({
-		where: { id: distribution.id },
-		update: { requestId: distribution.requestId, sourceCampId: distribution.sourceCampId, destinationCampId: distribution.destinationCampId, sourceItemId: distribution.sourceItemId, createdById: distribution.createdById, itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit, notes: distribution.notes, status: distribution.status, shippedAt: distribution.shippedAt, receivedAt: distribution.receivedAt, createdAt: distribution.createdAt },
-		create: { id: distribution.id, requestId: distribution.requestId, sourceCampId: distribution.sourceCampId, destinationCampId: distribution.destinationCampId, sourceItemId: distribution.sourceItemId, createdById: distribution.createdById, itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit, notes: distribution.notes, status: distribution.status, shippedAt: distribution.shippedAt, receivedAt: distribution.receivedAt, createdAt: distribution.createdAt },
-	});
+	const metadata = unitMetadata(distribution.unit);
+	const data = { requestId: distribution.requestId, sourceCampId: distribution.sourceCampId, destinationCampId: distribution.destinationCampId, sourceItemId: distribution.sourceItemId, createdById: distribution.createdById, itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit, requestedQuantity: distribution.quantity, requestedUnit: distribution.unit, baseQuantity: distribution.quantity * metadata.conversionFactor, baseUnit: metadata.baseUnit, unitDimension: metadata.unitDimension, conversionFactor: metadata.conversionFactor, conversionStatus: metadata.conversionStatus, notes: distribution.notes, status: distribution.status, shippedAt: distribution.shippedAt, receivedAt: distribution.receivedAt, createdAt: distribution.createdAt };
+	return prisma.distribution.upsert({ where: { id: distribution.id }, update: data, create: { id: distribution.id, ...data } });
 }
 
 async function upsertMovement(movement: MovementSeed) {
-	return prisma.inventoryMovement.upsert({
-		where: { id: movement.id },
-		update: { logisticsItemId: movement.logisticsItemId, campId: movement.campId, type: movement.type, quantity: movement.quantity, reason: movement.reason, createdById: movement.createdById, distributionId: movement.distributionId, createdAt: movement.createdAt },
-		create: { id: movement.id, logisticsItemId: movement.logisticsItemId, campId: movement.campId, type: movement.type, quantity: movement.quantity, reason: movement.reason, createdById: movement.createdById, distributionId: movement.distributionId, createdAt: movement.createdAt },
-	});
+	const item = await prisma.logisticsItem.findUniqueOrThrow({ where: { id: movement.logisticsItemId }, select: { baseUnit: true, unitDimension: true, conversionFactor: true } });
+	const data = { logisticsItemId: movement.logisticsItemId, campId: movement.campId, type: movement.type, quantity: movement.quantity, baseQuantity: movement.quantity * item.conversionFactor, baseUnit: item.baseUnit, unitDimension: item.unitDimension, conversionFactor: item.conversionFactor, reason: movement.reason, createdById: movement.createdById, distributionId: movement.distributionId, createdAt: movement.createdAt };
+	return prisma.inventoryMovement.upsert({ where: { id: movement.id }, update: data, create: { id: movement.id, ...data } });
 }
 
 async function validateSeed() {

@@ -58,16 +58,14 @@ export async function POST(request: Request) {
     try {
         const currentUser = await requireRole("SUPER_ADMIN");
 
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
-        const {
-            name,
-            email,
-            password,
-            role,
-            division,
-            campId,
-        } = body;
+        const name = typeof body.name === "string" ? body.name : "";
+        const email = typeof body.email === "string" ? body.email : "";
+        const password = typeof body.password === "string" ? body.password : "";
+        const role = String(body.role ?? "") as "MANAGER" | "DIVISION_HEAD" | "FIELD_OFFICER" | "SUPER_ADMIN";
+        const division = (typeof body.division === "string" ? body.division : null) as "LOGISTICS" | "SHELTER" | "DATA_REGISTRATION" | null;
+        const campId = typeof body.campId === "string" ? body.campId : null;
 
         if (!name || !email || !password || !role) {
             return NextResponse.json(

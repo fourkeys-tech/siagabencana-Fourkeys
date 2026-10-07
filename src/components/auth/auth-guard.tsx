@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "./user-provider";
 import { canAccessPath, findNavItem } from "@/lib/navigation";
 import { Alert } from "@/components/ui/alert";
+import { LogOut } from "lucide-react";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
 	const router = useRouter();
@@ -13,10 +14,25 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 	const { user, loading, status } = useSession();
 
 	useEffect(() => {
-		if (!loading && status === "unauthenticated") {
+		if (!loading && (status === "unauthenticated" || status === "expired")) {
 			router.replace(`/login?returnTo=${encodeURIComponent(pathname)}`);
 		}
 	}, [loading, status, pathname, router]);
+
+	if (status === "expired") {
+		return (
+			<div className="min-h-screen flex items-center justify-center p-6">
+				<div className="max-w-md space-y-4 text-center">
+					<Alert type="warning">
+						Sesi Anda telah berakhir. Silakan login ulang untuk melanjutkan.
+					</Alert>
+					<Link href="/login" className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline">
+						<LogOut size={14} /> Masuk kembali
+					</Link>
+				</div>
+			</div>
+		);
+	}
 
 	if (loading || status === "error" || !user) {
 		return (
@@ -48,7 +64,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 		);
 	}
 
-	if (match && !canAccessPath(pathname, user)) {
+	if (!canAccessPath(pathname, user)) {
 		return (
 			<div className="min-h-screen flex items-center justify-center p-6">
 				<div className="max-w-md space-y-4 text-center">

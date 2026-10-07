@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { SessionUser } from "@/lib/navigation";
 
-type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "error";
+type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "error" | "expired";
 
 type AuthContextValue = {
 	user: SessionUser | null;
@@ -35,7 +35,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 			const response = await fetch("/api/auth/me", { cache: "no-store" });
 			if (response.status === 401) {
 				setUser(null);
-				setStatus("unauthenticated");
+				setStatus("expired");
 				return;
 			}
 			if (!response.ok) {

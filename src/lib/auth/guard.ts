@@ -1,8 +1,8 @@
-import { getCurrentUser } from "@/lib/auth/session";
-import { DivisionType, Role } from "@prisma/client";
+import type { DivisionType, Role } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 export async function requireAuth() {
+	const { getCurrentUser } = await import("@/lib/auth/session");
 	const user = await getCurrentUser();
 	if (!user) throw new Error("UNAUTHORIZED");
 	return user;
@@ -42,6 +42,16 @@ export function canManageCamp(
 	campId: string,
 ) {
 	return user.role === "SUPER_ADMIN" || Boolean(user.campId && user.campId === campId);
+}
+
+/**
+ * Mengembalikan filter Prisma untuk camp yang dapat diakses oleh user.
+ * SUPER_ADMIN dapat mengakses semua camp (undefined).
+ * Role lain hanya dapat mengakses camp tempat mereka ditugaskan.
+ */
+export function getAccessibleCampWhere(user: { role: Role; campId: string | null }) {
+	if (user.role === "SUPER_ADMIN") return {};
+	return { id: user.campId ?? "" };
 }
 
 export function isAuthError(error: unknown): error is Error {

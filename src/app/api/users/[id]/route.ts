@@ -10,6 +10,9 @@ type Params = {
     }>;
 };
 
+type EditableRole = "MANAGER" | "DIVISION_HEAD" | "FIELD_OFFICER" | "SUPER_ADMIN";
+type EditableDivision = "LOGISTICS" | "SHELTER" | "DATA_REGISTRATION";
+
 export async function GET(
     _request: Request,
     { params }: Params,
@@ -86,7 +89,7 @@ export async function PUT(
         if (!managerEditing && currentUser.role !== "SUPER_ADMIN") {
             return NextResponse.json({ success: false, message: "Tidak memiliki akses untuk mengedit anggota." }, { status: 403 });
         }
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const existingUser = await prisma.user.findUnique({
             where: { id },
@@ -115,7 +118,7 @@ export async function PUT(
             );
         }
 
-        const role = body.role ?? existingUser.role;
+        const role = (body.role === undefined ? existingUser.role : String(body.role)) as EditableRole;
 
         if (
             !["MANAGER", "DIVISION_HEAD", "FIELD_OFFICER", "SUPER_ADMIN"].includes(role)
@@ -129,15 +132,13 @@ export async function PUT(
             );
         }
 
-        const division =
-            body.division !== undefined
-                ? body.division
-                : existingUser.division;
+        const division = (body.division !== undefined
+            ? typeof body.division === "string" ? body.division : null
+            : existingUser.division) as EditableDivision | null;
 
-        const campId =
-            body.campId !== undefined
-                ? body.campId
-                : existingUser.campId;
+        const campId = body.campId !== undefined
+            ? typeof body.campId === "string" ? body.campId : null
+            : existingUser.campId;
 
         if (role !== "SUPER_ADMIN" && !campId) {
             return NextResponse.json({ success: false, message: "Manager, ketua divisi, dan Field Officer wajib ditugaskan ke posko." }, { status: 400 });
@@ -230,7 +231,7 @@ export async function PUT(
             return NextResponse.json({ success: false, message: "Manager bertanggung jawab atas seluruh divisi; division harus kosong." }, { status: 400 });
         }
 
-        if (managerEditing && role === "DIVISION_HEAD" && division) {
+        if (managerEditing && role === "DIVISION_HEAD" && campId && division) {
             const currentHead = await prisma.campDivisionHead.findUnique({ where: { campId_division: { campId, division } } });
             if (currentHead && currentHead.userId !== id) return NextResponse.json({ success: false, message: "Divisi tersebut sudah memiliki ketua." }, { status: 409 });
         }

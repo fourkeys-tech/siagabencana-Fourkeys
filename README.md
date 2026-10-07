@@ -39,8 +39,26 @@ src/
 │   ├── seed.ts            # Script seed data
 │   ├── navigation.ts      # Konfigurasi menu + guard role
 │   ├── occupancy.ts       # Helper warna okupansi
+│   ├── api-response.ts    # Wrapper response API konsisten
+│   ├── api-client.ts      # Client helper untuk fetch API
+│   ├── pagination.ts      # Helper pagination untuk list endpoint
+│   ├── validation.ts      # Schema builder untuk validasi input
+│   ├── camp-validation.ts # Validator untuk CampInput
+│   ├── distribution.ts    # Logic distribusi antar-posko
+│   ├── inventory.ts       # Logic pergerakan stok + reserved
+│   ├── audit.ts           # Penulisan log audit
 │   └── auth/              # session.ts, guard.ts
-└── proxy.ts               # Redirect "/" → "/public"
+├── app/
+│   ├── error.tsx          # Global error boundary
+│   └── not-found.tsx      # Halaman 404
+└── components/
+    ├── ui/
+    │   ├── button.tsx, card.tsx, badge.tsx, alert.tsx
+    │   ├── modal.tsx      # Modal dengan focus trap
+    │   ├── form-field.tsx # Form input dengan htmlFor a11y
+    │   ├── skeleton.tsx   # Loading skeleton
+    │   └── search-input.tsx # Search input + filter util
+    └── ...
 prisma/
 ├── schema.prisma          # Skema database
 └── migrations/            # Migrasi Prisma
@@ -365,7 +383,79 @@ Relasi: `User` → `Camp` (SetNull), sedangkan `LogisticsItem`, `FacilityReport`
 
 ## Catatan Teknis
 
-- **Root redirect**: `src/proxy.ts` me-redirect `/` → `/public` di sisi server sebelum React dirender
+- **Root redirect**: `src/app/page.tsx` me-redirect `/` → `/public` di sisi server sebelum React dirender
 - **Guard**: route dashboard dijaga `AuthGuard` (client) + API mengembalikan 401 tanpa sesi
 - **Peta**: hanya dirender di client (`ssr: false`) karena Leaflet membutuhkan `window`
 - **Data publik**: endpoint publik tidak pernah mengekspos nama pengungsi, email, atau data pribadi — hanya agregat okupansi dan kondisi operasional
+
+---
+
+## Role & Permission Matrix
+
+| Fitur | SUPER_ADMIN | MANAGER | DIVISION_HEAD | FIELD_OFFICER |
+| --- | :---: | :---: | :---: | :---: |
+| Dashboard / Monitoring / Laporan | ✓ (semua posko) | ✓ (posko sendiri) | ✓ (posko sendiri) | ✓ (posko sendiri) |
+| Kelola Posko (CRUD) | ✓ | ✗ | ✗ | ✗ |
+| Assign Manager / Division Head | ✓ | ✗ | ✗ | ✗ |
+| Logistik (CRUD + pergerakan) | ✓ | ✓ (camp sendiri) | ✓ (divisi LOGISTICS) | ✓ (divisi LOGISTICS) |
+| Distribusi (request/approve/ship/receive) | ✓ | ✓ (camp sendiri) | ✓ (divisi LOGISTICS) | ✓ (divisi LOGISTICS) |
+| Shelter / Facility Report | ✓ | ✓ (camp sendiri) | ✓ (divisi SHELTER) | ✓ (divisi SHELTER) |
+| Pengungsi (CRUD + check-out) | ✓ | ✓ (camp sendiri) | ✓ (divisi DATA_REGISTRATION) | ✓ (divisi DATA_REGISTRATION) |
+| Manajemen Pengguna (CRUD) | ✓ | ✓ (tim sendiri, non-admin) | ✗ | ✗ |
+| Pengaturan Akun | ✓ | ✓ | ✓ | ✓ |
+| Riwayat Aktivitas | ✓ (semua) | ✓ (camp sendiri) | ✓ (camp sendiri) | ✓ (camp sendiri) |
+| Lihat Halaman Publik | ✓ | ✓ | ✓ | ✓ |
+
+Hierarki: `SUPER_ADMIN → MANAGER → DIVISION_HEAD → FIELD_OFFICER`. Tiap manager memimpin satu posko, satu divisi memiliki satu ketua.
+
+---
+
+## Alur Bisnis Inti
+
+### Distribusi Logistik
+
+```
+PENDING ──APPROVE──▶ APPROVED ──RESERVE──▶ RESERVED ──SHIP──▶ SHIPPED ──RECEIVE──▶ RECEIVED
+   │                                                  │
+   └──────REJECT──▶ REJECTED  └────────CANCEL─────────┘
+```
+
+- **PENDING** dibuat oleh logistik posko tujuan (`/api/distribution` POST).
+- **APPROVE** oleh logistik posko asal: pilih sumber item + jumlah (jumlah ≤ permintaan). Stok sumber di-*reserve* (jumlah ditambahkan ke `reservedQuantity`).
+- **SHIP** oleh logistik posko asal: stok sumber berkurang (sekaligus reservasi dilepas), distribusi berstatus `SHIPPED`.
+- **RECEIVE** oleh logistik posko tujuan: stok tujuan bertambah dengan item sumber (atau buat baru jika belum ada).
+- **CANCEL** selama `RESERVED` akan melepas reservasi. Stok sumber tidak berubah.
+- **REJECT** hanya saat `PENDING`. Stok sumber tidak berubah.
+
+### Inventory Movement
+
+Tipe pergerakan (`InventoryMovementType`):
+- `RECEIPT` — stok masuk dari supplier/donasi (menambah `quantity`)
+- `DAMAGE` — barang rusak (mengurangi `quantity`, menambah `damagedQuantity`, **wajib ada reason**)
+- `LOSS` — barang hilang (mengurangi `quantity`, **wajib ada reason**)
+- `RESTORE` — pemulihan barang rusak (mengurangi `damagedQuantity`, menambah `quantity`, **wajib ada reason**, **jumlah ≤ damagedQuantity**)
+- `RESERVATION` / `RESERVATION_RELEASE` — otomatis saat alur distribusi
+- `DISTRIBUTION_OUT` / `DISTRIBUTION_IN` — otomatis saat stok keluar/masuk posko
+
+Status operasional `LogisticsItem` dihitung otomatis oleh `refreshOperationalStatus`:
+- `SPOILED_OR_DAMAGED` dipertahankan apapun kondisinya (kecuali `RESTORE` mengembalikan ke usable)
+- Jika `quantity - reservedQuantity ≤ 0` → `CRITICAL`
+- Jika `quantity - reservedQuantity ≤ minimumQuantity` → `LOW`
+- Lainnya → `SUFFICIENT`
+
+### Okupansi Posko
+
+- `Camp.currentOccupants` adalah denormalisasi dari `SUM(EvacueeRecord.totalFamily WHERE departedAt IS NULL)`.
+- Increment saat POST `/api/evacuees`, decrement saat checkout atau delete (jika belum checkout).
+- Defensive check: `Camp.currentOccupants` tidak boleh negatif; checkout/delete akan return 409 jika state tidak konsisten.
+
+---
+
+## Standar & Konvensi
+
+- **Response API**: selalu `{ success: boolean, data?, message?, pagination? }`. Pakai helper `src/lib/api-response.ts` (`ok`, `fail`, `unauthorized`, `forbidden`, `notFound`).
+- **Validasi input**: pakai `src/lib/validation.ts` (`v.string`, `v.int`, `v.float`, `v.enum`, `object`) atau schema khusus seperti `parseCampInput`.
+- **Pagination**: list endpoint mengembalikan `{ data, pagination: { page, limit, total, totalPages } }` lewat `src/lib/pagination.ts`.
+- **Client API**: pakai `apiGet`, `apiPost`, `apiPut`, `apiPatch`, `apiDelete` dari `src/lib/api-client.ts` agar error handling seragam.
+- **Aksesibilitas**: `FormField`/`FormSelect` punya `htmlFor`+`id`+`aria-invalid`+`aria-describedby`. `Modal` punya focus trap + `aria-modal` + Escape-to-close.
+- **Audit log**: tulis lewat `writeAuditLog({ userId, action, entity, entityId, details })` di `src/lib/audit.ts`. `details` akan di-JSON-stringify otomatis.

@@ -42,7 +42,7 @@ export function Sidebar({
 	return (
 		<>
 			{mobileOpen && <button type="button" aria-label="Tutup menu navigasi" onClick={onClose} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
-			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,20rem)] flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:w-72 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
+			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,20rem)] max-w-full flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:w-72 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
 				<div className="flex h-20 w-full items-center border-b border-white/10 px-5 overflow-hidden">
 					<Link
 						href="/dashboard"

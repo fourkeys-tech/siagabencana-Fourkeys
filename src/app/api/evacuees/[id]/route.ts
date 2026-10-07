@@ -90,7 +90,7 @@ export async function PUT(
             );
         }
 
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const updated = await prisma.evacueeRecord.update({
             where: { id },
@@ -158,11 +158,16 @@ export async function DELETE(
         }
 
         await prisma.$transaction(async (tx) => {
-            await tx.evacueeRecord.delete({
-                where: { id },
-            });
-
             if (!existing.departedAt) {
+                const camp = await tx.camp.findUnique({
+                    where: { id: existing.campId },
+                    select: { currentOccupants: true },
+                });
+
+                if (!camp || camp.currentOccupants < existing.totalFamily) {
+                    throw new Error("INVALID_CAMP_OCCUPANCY");
+                }
+
                 await tx.camp.update({
                     where: { id: existing.campId },
                     data: {
@@ -172,6 +177,10 @@ export async function DELETE(
                     },
                 });
             }
+
+            await tx.evacueeRecord.delete({
+                where: { id },
+            });
         });
 
         return NextResponse.json({
@@ -179,6 +188,13 @@ export async function DELETE(
             message: "Data pengungsi berhasil dihapus.",
         });
     } catch (error) {
+        if (error instanceof Error && error.message === "INVALID_CAMP_OCCUPANCY") {
+            return NextResponse.json(
+                { success: false, message: "Jumlah pengungsi saat ini di posko tidak mencukupi untuk penghapusan ini." },
+                { status: 409 },
+            );
+        }
+
         if (isAuthError(error)) {
             return authError(error);
         }

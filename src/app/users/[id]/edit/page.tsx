@@ -127,12 +127,12 @@ export default function UserEditPage() {
 	const isSuperAdmin = formData.role === "SUPER_ADMIN";
 
 	return (
-		<div className="space-y-6">
+		<div className="w-full max-w-3xl min-w-0 space-y-6">
 			<div><Link href={`/users/${user.id}`} className="text-sm font-medium text-blue-600 hover:underline">← Kembali ke Detail Pengguna</Link><h1 className="mt-2 text-2xl font-bold text-gray-900">Edit Pengguna: {user.name}</h1></div>
 
 			{error && <Alert type="error">{error}</Alert>}
 
-			<form onSubmit={handleSubmit} className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
+			<form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-4 sm:p-6">
 				<FormField
 					label="Nama"
 					value={formData.name}
@@ -204,7 +204,7 @@ export default function UserEditPage() {
 						required={!isSuperAdmin}
 					/>
 				)}
-				<div className="flex justify-end gap-3 mt-6">
+				<div className="flex flex-col-reverse gap-2 pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:pt-0">
 					<Link href={`/users/${user.id}`}>
 						<Button type="button" variant="secondary">
 							Batal

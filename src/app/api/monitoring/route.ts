@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 const PROBLEM_LOGISTICS = ["LOW", "CRITICAL", "SPOILED_OR_DAMAGED"];
 const PROBLEM_FACILITIES = ["DAMAGED", "REPAIRING"];
@@ -17,10 +17,7 @@ export async function GET() {
     try {
         const user = await requireAuth();
 
-        const where =
-            user.role === "SUPER_ADMIN"
-                ? {}
-                : { id: user.campId! };
+        const where = getAccessibleCampWhere(user);
 
         const camps = await prisma.camp.findMany({
             where,

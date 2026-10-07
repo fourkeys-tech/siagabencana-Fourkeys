@@ -84,7 +84,7 @@ export default function CampDetailPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
+			<div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<h1 className="text-2xl font-bold text-gray-900">
 					Detail Posko: {camp.name}
 				</h1>
@@ -98,7 +98,7 @@ export default function CampDetailPage() {
 				</div>
 			</div>
 
-			<div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+			<div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-6">
 				<div className="h-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><CampMap camps={[{ id: camp.id, name: camp.name, address: camp.address, latitude: camp.latitude, longitude: camp.longitude, maxCapacity: camp.maxCapacity, currentOccupants: camp.currentOccupants, occupancyPercentage: camp.maxCapacity > 0 ? Number(((camp.currentOccupants / camp.maxCapacity) * 100).toFixed(2)) : 0, status: camp.status } satisfies MapCamp]} activeId={camp.id} /></div>
 				<div className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
 				<div>

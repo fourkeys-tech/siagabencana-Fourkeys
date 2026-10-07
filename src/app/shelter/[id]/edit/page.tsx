@@ -5,13 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { FormField, FormSelect } from "@/components/ui/form-field";
+import { FormField } from "@/components/ui/form-field";
 
 interface FacilityReport {
 	id: string;
 	campId: string;
 	facilityName: string;
-	status: string;
+	status: "GOOD" | "DAMAGED" | "REPAIRING";
 	description: string;
 }
 
@@ -23,7 +23,6 @@ export default function ShelterEditPage() {
 	const [report, setReport] = useState<FacilityReport | null>(null);
 	const [formData, setFormData] = useState({
 		facilityName: "",
-		status: "",
 		description: "",
 	});
 	const [loading, setLoading] = useState(true);
@@ -40,7 +39,6 @@ export default function ShelterEditPage() {
 					setReport(data.data);
 					setFormData({
 						facilityName: data.data.facilityName,
-						status: data.data.status,
 						description: data.data.description,
 					});
 				} else {
@@ -51,32 +49,29 @@ export default function ShelterEditPage() {
 			.finally(() => setLoading(false));
 	}, [id]);
 
-	const handleSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
+	const handleSubmit = async (event: React.FormEvent) => {
+		event.preventDefault();
 		setSubmitting(true);
 		setError("");
 
 		try {
-			const res = await fetch(`/api/shelter/${id}`, {
+			const response = await fetch(`/api/shelter/${id}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					facilityName: formData.facilityName,
-					status: formData.status,
 					description: formData.description,
 				}),
 			});
+			const data = await response.json();
 
-			const data = await res.json();
-
-			if (data.success) {
-				router.push(`/shelter/${id}`);
-				router.refresh();
-			} else {
-				setError(data.message ?? "Gagal memperbarui laporan shelter");
+			if (!response.ok || !data.success) {
+				throw new Error(data.message ?? "Gagal memperbarui laporan shelter");
 			}
-		} catch {
-			setError("Terjadi kesalahan");
+			router.push(`/shelter/${id}`);
+			router.refresh();
+		} catch (submitError) {
+			setError(submitError instanceof Error ? submitError.message : "Terjadi kesalahan");
 		} finally {
 			setSubmitting(false);
 		}
@@ -84,69 +79,42 @@ export default function ShelterEditPage() {
 
 	if (loading) {
 		return (
-			<div className="flex items-center justify-center h-64">
-				<span className="text-gray-500 text-lg">
-					Memuat...
-				</span>
+			<div className="flex h-64 items-center justify-center">
+				<span className="text-lg text-gray-500">Memuat...</span>
 			</div>
 		);
 	}
 
-	if (error) {
-		return <Alert type="error">{error}</Alert>;
-	}
-
-	if (!report) {
-		return <Alert type="info">Laporan fasilitas tidak ditemukan.</Alert>;
-	}
+	if (error && !report) return <Alert type="error">{error}</Alert>;
+	if (!report) return <Alert type="info">Laporan fasilitas tidak ditemukan.</Alert>;
 
 	return (
-		<div className="space-y-6">
-			<h1 className="text-2xl font-bold text-gray-900">
-				Edit Laporan Shelter: {report.facilityName}
-			</h1>
-
+		<div className="w-full max-w-3xl min-w-0 space-y-6">
+			<h1 className="text-2xl font-bold text-gray-900">Edit Laporan Shelter: {report.facilityName}</h1>
 			{error && <Alert type="error">{error}</Alert>}
-
-			<form onSubmit={handleSubmit} className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
+			<form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
 				<FormField
 					label="Nama Fasilitas"
 					value={formData.facilityName}
-					onChange={(v) =>
-						setFormData({ ...formData, facilityName: v })
-					}
+					onChange={(value) => setFormData((current) => ({ ...current, facilityName: value }))}
 					required
 				/>
-				<FormSelect
-					label="Status"
-					value={formData.status}
-					onChange={(v) =>
-						setFormData({ ...formData, status: v })
-					}
-					options={[
-						{ value: "GOOD", label: "GOOD" },
-						{ value: "DAMAGED", label: "DAMAGED" },
-						{ value: "REPAIRING", label: "REPAIRING" },
-					]}
-					required
-				/>
+				<div className="space-y-1.5">
+					<p className="block text-xs font-bold uppercase tracking-wide text-slate-600">Status saat ini</p>
+					<div className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm font-medium text-slate-700">{report.status}</div>
+					<p className="text-xs text-slate-500">Gunakan menu aksi pada daftar shelter untuk memulai atau menyelesaikan perbaikan.</p>
+				</div>
 				<FormField
 					label="Deskripsi"
 					value={formData.description}
-					onChange={(v) =>
-						setFormData({ ...formData, description: v })
-					}
+					onChange={(value) => setFormData((current) => ({ ...current, description: value }))}
 					required
 				/>
-				<div className="flex justify-end gap-3 mt-6">
+				<div className="flex flex-col-reverse gap-2 pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:pt-0">
 					<Link href={`/shelter/${report.id}`}>
-						<Button type="button" variant="secondary">
-							Batal
-						</Button>
+						<Button type="button" variant="secondary">Batal</Button>
 					</Link>
-					<Button type="submit" disabled={submitting}>
-						{submitting ? "Menyimpan..." : "Simpan Perubahan"}
-					</Button>
+					<Button type="submit" disabled={submitting}>{submitting ? "Menyimpan..." : "Simpan Perubahan"}</Button>
 				</div>
 			</form>
 		</div>

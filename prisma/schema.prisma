@@ -51,10 +51,23 @@ enum InventoryMovementType {
   RECEIPT
   DAMAGE
   LOSS
+  RESTORE
+  DISPOSE
   RESERVATION
   RESERVATION_RELEASE
   DISTRIBUTION_OUT
   DISTRIBUTION_IN
+}
+
+enum UnitDimension {
+  COUNT
+  MASS
+  VOLUME
+}
+
+enum UnitConversionStatus {
+  CONFIGURED
+  NEEDS_REVIEW
 }
 
 model User {
@@ -144,6 +157,15 @@ model LogisticsItem {
   damagedQuantity  Int    @default(0)
   minimumQuantity  Int    @default(0)
   unit             String
+  baseUnit         String             @default("pcs")
+  unitDimension     UnitDimension     @default(COUNT)
+  conversionFactor  Int                @default(1)
+  conversionStatus  UnitConversionStatus @default(NEEDS_REVIEW)
+  conversionNote    String?
+  quantityBase      Int                @default(0)
+  reservedQuantityBase Int             @default(0)
+  damagedQuantityBase  Int             @default(0)
+  minimumQuantityBase  Int             @default(0)
 
   status              ItemStatus     @default(SUFFICIENT)
   notes               String?
@@ -163,6 +185,10 @@ model InventoryMovement {
   campId          String
   type            InventoryMovementType
   quantity        Int
+  baseQuantity    Int?
+  baseUnit        String?
+  unitDimension   UnitDimension?
+  conversionFactor Int?
   reason          String?
   createdById     String?
   distributionId  String?
@@ -189,6 +215,13 @@ model LogisticsRequest {
   itemName        String
   quantity        Int
   unit            String
+  requestedQuantity Int?
+  requestedUnit     String?
+  baseQuantity      Int?
+  baseUnit          String?
+  unitDimension     UnitDimension?
+  conversionFactor  Int?
+  conversionStatus  UnitConversionStatus?
   notes           String?
   rejectionReason String?
   status          DistributionStatus @default(PENDING)
@@ -216,13 +249,23 @@ model Distribution {
   sourceItemId      String?
   createdById       String
 
-  itemName   String
-  quantity   Int
-  unit       String
-  notes      String?
+  itemName          String
+  quantity          Int
+  unit              String
+  requestedQuantity  Int?
+  requestedUnit      String?
+  baseQuantity       Int?
+  baseUnit           String?
+  unitDimension      UnitDimension?
+  conversionFactor   Int?
+  conversionStatus   UnitConversionStatus?
+  notes             String?
   status     DistributionStatus @default(APPROVED)
   shippedAt  DateTime?
   receivedAt DateTime?
+  receiptProofData     String? @db.Text
+  receiptProofName     String?
+  receiptProofMimeType String?
 
   inventoryMovements InventoryMovement[]
 

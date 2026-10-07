@@ -80,7 +80,7 @@ export default function UserDetailPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex flex-wrap items-center justify-between gap-3">
+			<div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<div><Link href="/users" className="text-sm font-medium text-blue-600 hover:underline">← Kembali ke Pengguna</Link><h1 className="mt-2 text-2xl font-bold text-gray-900">Detail Pengguna: {user.name}</h1></div>
 				<div className="flex gap-2">
 					<Link href={`/users/${user.id}/edit`}>

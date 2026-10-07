@@ -51,6 +51,9 @@ interface ReportData {
 		itemName: string;
 		quantity: number;
 		unit: string;
+		quantityBase: number;
+		baseUnit: string;
+		conversionStatus: "CONFIGURED" | "NEEDS_REVIEW";
 		status: string;
 		camp: { name: string };
 	}>;
@@ -67,6 +70,9 @@ interface ReportData {
 		itemName: string;
 		quantity: number;
 		unit: string;
+		baseQuantity: number | null;
+		baseUnit: string | null;
+		conversionStatus: "CONFIGURED" | "NEEDS_REVIEW";
 		status: string;
 		createdAt: string;
 		sourceCamp: { name: string };
@@ -159,7 +165,7 @@ export default function ReportsPage() {
 
 			{data && !loading && <>
 				<div className="hidden print:block"><p className="text-sm text-gray-600">Periode: {from} sampai {to}</p></div>
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-4 print:grid-cols-4">
+				<div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-4 print:grid-cols-4">
 					<Card><CardLabel>Total Posko</CardLabel><CardValue>{data.summary.totalCamps}</CardValue></Card>
 					<Card><CardLabel>Total Pengungsi</CardLabel><CardValue>{data.summary.totalEvacueeFamilies}</CardValue></Card>
 					<Card><CardLabel>Okupansi</CardLabel><CardValue>{data.summary.occupancyPercentage}%</CardValue></Card>
@@ -175,13 +181,15 @@ export default function ReportsPage() {
 
 				<section className="rounded-lg border bg-white shadow-sm">
 					<div className="border-b px-5 py-4"><h2 className="font-semibold">Status Posko</h2></div>
-					<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Bermasalah"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.camps.map((camp) => <tr key={camp.id}><td className="px-5 py-3 text-sm font-medium">{camp.name}</td><td className="px-5 py-3"><Badge label={camp.status} /></td><td className="px-5 py-3 text-sm">{camp.maxCapacity}</td><td className="px-5 py-3 text-sm">{camp.currentOccupants}</td><td className="px-5 py-3 text-sm">{camp.occupancyPercentage}%</td><td className="px-5 py-3 text-sm">{camp.problemLogistics}</td><td className="px-5 py-3 text-sm">{camp.damagedFacilities}</td></tr>)}</tbody></table></div>
+					<div className="min-w-0 overflow-x-auto" role="region" aria-label="Data laporan" tabIndex={0}><table className="min-w-[60rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Bermasalah"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.camps.map((camp) => <tr key={camp.id}><td className="px-5 py-3 text-sm font-medium">{camp.name}</td><td className="px-5 py-3"><Badge label={camp.status} /></td><td className="px-5 py-3 text-sm">{camp.maxCapacity}</td><td className="px-5 py-3 text-sm">{camp.currentOccupants}</td><td className="px-5 py-3 text-sm">{camp.occupancyPercentage}%</td><td className="px-5 py-3 text-sm">{camp.problemLogistics}</td><td className="px-5 py-3 text-sm">{camp.damagedFacilities}</td></tr>)}</tbody></table></div>
 				</section>
 
 				<section className="rounded-lg border bg-white shadow-sm print:break-before-page">
 					<div className="border-b px-5 py-4"><h2 className="font-semibold">Aktivitas Pengungsi</h2></div>
-					<div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Nama", "Posko", "Jumlah Keluarga", "Kebutuhan Khusus", "Tiba", "Keluar"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.evacuees.map((record) => <tr key={record.id}><td className="px-5 py-3 text-sm font-medium">{record.name}</td><td className="px-5 py-3 text-sm">{record.camp.name}</td><td className="px-5 py-3 text-sm">{record.totalFamily}</td><td className="px-5 py-3 text-sm">{record.hasSpecialNeeds ? "Ya" : "Tidak"}</td><td className="px-5 py-3 text-sm">{dateLabel(record.arrivedAt)}</td><td className="px-5 py-3 text-sm">{dateLabel(record.departedAt)}</td></tr>)}</tbody></table></div>
+					<div className="min-w-0 overflow-x-auto" role="region" aria-label="Data laporan" tabIndex={0}><table className="min-w-[60rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Nama", "Posko", "Jumlah Keluarga", "Kebutuhan Khusus", "Tiba", "Keluar"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.evacuees.map((record) => <tr key={record.id}><td className="px-5 py-3 text-sm font-medium">{record.name}</td><td className="px-5 py-3 text-sm">{record.camp.name}</td><td className="px-5 py-3 text-sm">{record.totalFamily}</td><td className="px-5 py-3 text-sm">{record.hasSpecialNeeds ? "Ya" : "Tidak"}</td><td className="px-5 py-3 text-sm">{dateLabel(record.arrivedAt)}</td><td className="px-5 py-3 text-sm">{dateLabel(record.departedAt)}</td></tr>)}</tbody></table></div>
 				</section>
+
+				<section className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold">Logistik</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Logistik laporan" tabIndex={0}><table className="min-w-[64rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Posko", "Jumlah", "Saldo dasar", "Status konversi", "Status"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.logistics.map((item) => <tr key={item.id}><td className="px-5 py-3 text-sm font-medium">{item.itemName}</td><td className="px-5 py-3 text-sm">{item.camp.name}</td><td className="px-5 py-3 text-sm">{item.quantity} {item.unit}</td><td className="px-5 py-3 text-sm">{item.quantityBase} {item.baseUnit}</td><td className="px-5 py-3 text-sm">{item.conversionStatus === "NEEDS_REVIEW" ? "Perlu verifikasi" : "Terverifikasi"}</td><td className="px-5 py-3"><Badge label={item.status} /></td></tr>)}</tbody></table></div></section>
 			</>}
 		</div>
 	);

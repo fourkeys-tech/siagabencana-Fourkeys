@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
 
 function parseDate(value: string | null, endOfDay = false) {
 	if (!value) return null;
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 			);
 		}
 
-		const campWhere = user.role === "SUPER_ADMIN" ? {} : { id: user.campId ?? "" };
+		const campWhere = getAccessibleCampWhere(user);
 		const camps = await prisma.camp.findMany({
 			where: campWhere,
 			select: {
@@ -76,6 +76,9 @@ export async function GET(request: Request) {
 					itemName: true,
 					quantity: true,
 					unit: true,
+					quantityBase: true,
+					baseUnit: true,
+					conversionStatus: true,
 					status: true,
 					camp: { select: { id: true, name: true } },
 				},
@@ -109,6 +112,9 @@ export async function GET(request: Request) {
 					itemName: true,
 					quantity: true,
 					unit: true,
+					baseQuantity: true,
+					baseUnit: true,
+					conversionStatus: true,
 					status: true,
 					createdAt: true,
 					shippedAt: true,

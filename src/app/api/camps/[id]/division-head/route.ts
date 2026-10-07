@@ -10,7 +10,7 @@ export async function PUT(request: Request, { params }: Params) {
 	try {
 		const admin = await requireRole("SUPER_ADMIN");
 		const { id: campId } = await params;
-		const body = await request.json();
+		const body = await request.json() as Record<string, unknown>;
 		const division = String(body.division ?? "") as DivisionType;
 		const userId = body.userId ? String(body.userId) : null;
 		if (!validDivisions.includes(division)) return NextResponse.json({ success: false, message: "Divisi tidak valid." }, { status: 400 });

@@ -11,6 +11,20 @@ export type SessionUser = {
 	} | null;
 };
 
+// Konstanta role & division sebagai fallback type (saat runtime berasal dari Prisma enum).
+export const ROLES = {
+	SUPER_ADMIN: "SUPER_ADMIN",
+	MANAGER: "MANAGER",
+	DIVISION_HEAD: "DIVISION_HEAD",
+	FIELD_OFFICER: "FIELD_OFFICER",
+} as const;
+
+export const DIVISIONS = {
+	LOGISTICS: "LOGISTICS",
+	SHELTER: "SHELTER",
+	DATA_REGISTRATION: "DATA_REGISTRATION",
+} as const;
+
 export type NavItem = {
 	href: string;
 	label: string;
@@ -47,7 +61,6 @@ export const NAV_SECTIONS: NavSection[] = [
 				href: "/distribusi",
 				label: "Distribusi",
 				roles: ["SUPER_ADMIN", "MANAGER", "DIVISION_HEAD", "FIELD_OFFICER"],
-				divisions: ["LOGISTICS"],
 			},
 		],
 	},
@@ -72,6 +85,21 @@ export const NAV_SECTIONS: NavSection[] = [
 		],
 	},
 ];
+
+// Routes yang hanya boleh diakses jika user sudah login (authenticated).
+// Digunakan untuk halaman detail/edit dinamis yang tidak didefinisikan di NAV_SECTIONS
+// seperti /users/:id/edit, /logistik/:id, dll.
+export const PROTECTED_PARENT_ROUTES: string[] = [
+	"/users",
+	"/kelola-posko",
+	"/logistik",
+	"/pengungsi",
+	"/shelter",
+];
+
+export function isProtectedPath(pathname: string) {
+	return PROTECTED_PARENT_ROUTES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 export function isItemVisible(item: NavItem, user: SessionUser | null) {
 	if (item.roles && !user) return false;
@@ -110,11 +138,18 @@ export function findNavItem(pathname: string) {
 export function canAccessPath(pathname: string, user: SessionUser | null) {
 	const match = findNavItem(pathname);
 
-	if (!match) return true;
+	if (match) {
+		if (match.item.disabled) return false;
+		return isItemVisible(match.item, user);
+	}
 
-	if (match.item.disabled) return false;
+	// Untuk path yang tidak ada di NAV_SECTIONS (mis. halaman detail/edit dinamis),
+	// tetap wajib user terautentikasi.
+	if (isProtectedPath(pathname)) {
+		return Boolean(user);
+	}
 
-	return isItemVisible(match.item, user);
+	return true;
 }
 
 export function getBreadcrumb(pathname: string) {

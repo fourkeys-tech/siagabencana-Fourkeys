@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { campValidationMessage, parseCampInput } from "@/lib/camp-validation";
 
 export async function GET() {
 	try {
 		const user = await requireAuth();
 		const camps = await prisma.camp.findMany({
-			where: user.role === "SUPER_ADMIN" ? undefined : { id: user.campId ?? "" },
+			where: getAccessibleCampWhere(user),
 			orderBy: { createdAt: "desc" },
 			select: {
 				id: true,
@@ -34,7 +34,7 @@ export async function GET() {
 export async function POST(request: Request) {
 	try {
 		await requireRole("SUPER_ADMIN");
-		const body = await request.json();
+		const body = await request.json() as Record<string, unknown>;
 		let campInput;
 		try {
 			campInput = parseCampInput({ ...body, status: body.status ?? "ACTIVE" });

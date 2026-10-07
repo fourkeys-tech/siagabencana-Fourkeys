@@ -28,7 +28,7 @@ export async function GET() {
 export async function PUT(request: Request) {
 	try {
 		const user = await requireAuth();
-		const body = await request.json();
+		const body = await request.json() as Record<string, unknown>;
 		const name = String(body.name ?? "").trim();
 		const email = String(body.email ?? "").trim().toLowerCase();
 
@@ -58,7 +58,7 @@ export async function PUT(request: Request) {
 export async function PATCH(request: Request) {
 	try {
 		const user = await requireAuth();
-		const body = await request.json();
+		const body = await request.json() as Record<string, unknown>;
 		const currentPassword = String(body.currentPassword ?? "");
 		const newPassword = String(body.newPassword ?? "");
 

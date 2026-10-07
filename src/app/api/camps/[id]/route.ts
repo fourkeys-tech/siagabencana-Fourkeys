@@ -73,7 +73,7 @@ export async function PUT(
         await requireRole("SUPER_ADMIN");
 
         const { id } = await params;
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const existingCamp = await prisma.camp.findUnique({
             where: { id },

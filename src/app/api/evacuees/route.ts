@@ -1,34 +1,33 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { parsePagination, paginatedResponse } from "@/lib/pagination";
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const user = await requireAuth();
         if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "DATA_REGISTRATION", user.campId))) {
             return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi registrasi posko ini." }, { status: 403 });
         }
 
-        const evacuees = await prisma.evacueeRecord.findMany({
-            where:
-                user.role === "SUPER_ADMIN"
-                    ? {}
-                    : { campId: user.campId! },
-            orderBy: { arrivedAt: "desc" },
-            include: {
-                camp: {
-                    select: {
-                        id: true,
-                        name: true,
-                    },
-                },
-            },
-        });
+        const params = parsePagination(new URL(request.url));
+        const skip = (params.page! - 1) * params.limit!;
+        const where = user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! };
 
-        return NextResponse.json({
-            success: true,
-            data: evacuees,
-        });
+        const [evacuees, total] = await Promise.all([
+            prisma.evacueeRecord.findMany({
+                where,
+                orderBy: { arrivedAt: "desc" },
+                skip,
+                take: params.limit,
+                include: {
+                    camp: { select: { id: true, name: true } },
+                },
+            }),
+            prisma.evacueeRecord.count({ where }),
+        ]);
+
+        return paginatedResponse(evacuees, total, params);
     } catch (error) {
         if (isAuthError(error)) {
             return authError(error);
@@ -60,11 +59,11 @@ export async function POST(request: Request) {
             );
         }
 
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const campId =
             user.role === "SUPER_ADMIN"
-                ? body.campId
+                ? (typeof body.campId === "string" ? body.campId : "")
                 : user.campId;
 
         const totalFamily = Number(body.totalFamily ?? 1);

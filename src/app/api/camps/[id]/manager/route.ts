@@ -8,7 +8,7 @@ export async function PUT(request: Request, { params }: Params) {
 	try {
 		const admin = await requireRole("SUPER_ADMIN");
 		const { id: campId } = await params;
-		const body = await request.json();
+		const body = await request.json() as Record<string, unknown>;
 		const managerId = body.userId ? String(body.userId) : null;
 		const camp = await prisma.camp.findUnique({ where: { id: campId }, select: { id: true } });
 		if (!camp) return NextResponse.json({ success: false, message: "Posko tidak ditemukan." }, { status: 404 });

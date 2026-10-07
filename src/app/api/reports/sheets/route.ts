@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { writeReportToGoogleSheet, type ReportSheetRow } from "@/lib/google-sheets";
 
 function parseDate(value: string | null, endOfDay = false) {
@@ -12,9 +12,11 @@ function parseDate(value: string | null, endOfDay = false) {
 export async function POST(request: Request) {
 	try {
 		const user = await requireAuth();
-		const body = await request.json();
-		const from = parseDate(body.from ?? null);
-		const to = parseDate(body.to ?? null, true);
+		const body = await request.json() as Record<string, unknown>;
+		const fromValue = typeof body.from === "string" ? body.from : null;
+		const toValue = typeof body.to === "string" ? body.to : null;
+		const from = parseDate(fromValue);
+		const to = parseDate(toValue, true);
 
 		if (!from || !to || from > to) {
 			return NextResponse.json(
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
 			);
 		}
 
-		const campWhere = user.role === "SUPER_ADMIN" ? {} : { id: user.campId ?? "" };
+		const campWhere = getAccessibleCampWhere(user);
 		const camps = await prisma.camp.findMany({
 			where: campWhere,
 			select: { id: true, name: true, maxCapacity: true, currentOccupants: true, status: true },
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
 			}),
 			prisma.logisticsItem.findMany({
 				where: { campId: { in: campIds } },
-				select: { itemName: true, quantity: true, unit: true, status: true, camp: { select: { name: true } } },
+				select: { itemName: true, quantity: true, unit: true, quantityBase: true, baseUnit: true, conversionStatus: true, status: true, camp: { select: { name: true } } },
 				orderBy: { updatedAt: "desc" },
 			}),
 			prisma.facilityReport.findMany({
@@ -50,13 +52,13 @@ export async function POST(request: Request) {
 			}),
 			prisma.distribution.findMany({
 				where: { OR: [{ sourceCampId: { in: campIds } }, { destinationCampId: { in: campIds } }], createdAt: period },
-				select: { itemName: true, quantity: true, unit: true, status: true, createdAt: true, sourceCamp: { select: { name: true } }, destinationCamp: { select: { name: true } } },
+				select: { itemName: true, quantity: true, unit: true, requestedQuantity: true, requestedUnit: true, baseQuantity: true, baseUnit: true, conversionStatus: true, status: true, createdAt: true, sourceCamp: { select: { name: true } }, destinationCamp: { select: { name: true } } },
 				orderBy: { createdAt: "desc" },
 			}),
 		]);
 
 		const rows: ReportSheetRow[] = [
-			["Periode", `${body.from} - ${body.to}`],
+			["Periode", `${fromValue} - ${toValue}`],
 			[],
 			["STATUS POSKO"],
 			["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi"],
@@ -67,16 +69,16 @@ export async function POST(request: Request) {
 			...evacuees.map((record) => [record.name, record.camp.name, record.totalFamily, record.hasSpecialNeeds ? "Ya" : "Tidak", record.arrivedAt.toISOString(), record.departedAt?.toISOString() ?? "-"]),
 			[],
 			["LOGISTIK"],
-			["Barang", "Posko", "Jumlah", "Unit", "Status"],
-			...logistics.map((item) => [item.itemName, item.camp.name, item.quantity, item.unit, item.status]),
+			["Barang", "Posko", "Jumlah", "Unit", "Saldo dasar", "Unit dasar", "Status konversi", "Status"],
+			...logistics.map((item) => [item.itemName, item.camp.name, item.quantity, item.unit, item.quantityBase, item.baseUnit, item.conversionStatus, item.status]),
 			[],
 			["FASILITAS"],
 			["Fasilitas", "Posko", "Status", "Deskripsi", "Tanggal"],
 			...facilities.map((facility) => [facility.facilityName, facility.camp.name, facility.status, facility.description, facility.createdAt.toISOString()]),
 			[],
 			["DISTRIBUSI"],
-			["Barang", "Asal", "Tujuan", "Jumlah", "Unit", "Status", "Tanggal"],
-			...distributions.map((distribution) => [distribution.itemName, distribution.sourceCamp.name, distribution.destinationCamp.name, distribution.quantity, distribution.unit, distribution.status, distribution.createdAt.toISOString()]),
+			["Barang", "Asal", "Tujuan", "Jumlah", "Unit", "Jumlah dasar", "Unit dasar", "Status konversi", "Status", "Tanggal"],
+			...distributions.map((distribution) => [distribution.itemName, distribution.sourceCamp.name, distribution.destinationCamp.name, distribution.requestedQuantity ?? distribution.quantity, distribution.requestedUnit ?? distribution.unit, distribution.baseQuantity ?? "-", distribution.baseUnit ?? "-", distribution.conversionStatus ?? "-", distribution.status, distribution.createdAt.toISOString()]),
 		];
 
 		const sectionRows: number[] = [];
@@ -94,8 +96,8 @@ export async function POST(request: Request) {
 
 		const result = await writeReportToGoogleSheet(
 			rows,
-			`LAPORAN SIAGA BENCANA | ${body.from} - ${body.to}`,
-			{ sectionRows, headerRows, columnCount: 7 },
+			`LAPORAN SIAGA BENCANA | ${fromValue} - ${toValue}`,
+			{ sectionRows, headerRows, columnCount: 10 },
 		);
 		return NextResponse.json({ success: true, message: "Laporan berhasil dikirim ke Google Sheets.", data: result });
 	} catch (error) {

@@ -46,6 +46,15 @@ export async function POST(
         }
 
         const result = await prisma.$transaction(async (tx) => {
+            const camp = await tx.camp.findUnique({
+                where: { id: existing.campId },
+                select: { currentOccupants: true },
+            });
+
+            if (!camp || camp.currentOccupants < existing.totalFamily) {
+                throw new Error("INVALID_CAMP_OCCUPANCY");
+            }
+
             const evacuee = await tx.evacueeRecord.update({
                 where: { id },
                 data: {
@@ -71,6 +80,13 @@ export async function POST(
             data: result,
         });
     } catch (error) {
+        if (error instanceof Error && error.message === "INVALID_CAMP_OCCUPANCY") {
+            return NextResponse.json(
+                { success: false, message: "Jumlah pengungsi saat ini di posko tidak mencukupi untuk check-out ini." },
+                { status: 409 },
+            );
+        }
+
         if (isAuthError(error)) {
             return authError(error);
         }

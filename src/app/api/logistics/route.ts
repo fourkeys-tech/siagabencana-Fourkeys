@@ -3,6 +3,42 @@ import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { receiveStock } from "@/lib/inventory";
 import { canManageDivision } from "@/lib/auth/guard";
+import { assertUnitDefinition, convertToBase, defaultUnitDefinition, inferDimension, inferBaseUnit, normalizeUnit, type UnitConversionStatus, type UnitDimension } from "@/lib/unit-conversion";
+
+const UNIT_DIMENSIONS = new Set<UnitDimension>(["COUNT", "MASS", "VOLUME"]);
+
+function parseUnitMetadata(body: Record<string, unknown>) {
+    const unit = normalizeUnit(body.unit);
+    const inferred = defaultUnitDefinition(unit);
+    const baseUnit = normalizeUnit(body.baseUnit ?? inferred.baseUnit ?? inferBaseUnit(unit));
+    const unitDimension = UNIT_DIMENSIONS.has(String(body.unitDimension) as UnitDimension)
+        ? String(body.unitDimension) as UnitDimension
+        : inferred.unitDimension ?? inferDimension(baseUnit);
+    const conversionFactor = Number(body.conversionFactor ?? (body.baseUnit === undefined ? inferred.conversionFactor : 1));
+    const conversionStatus: UnitConversionStatus = body.conversionStatus === "NEEDS_REVIEW"
+        ? "NEEDS_REVIEW"
+        : body.conversionStatus === "CONFIGURED"
+            || (inferred.conversionStatus === "CONFIGURED" && baseUnit === inferred.baseUnit)
+            || (unit === baseUnit && ["pcs", "unit", "g", "ml"].includes(baseUnit))
+            || (unit !== baseUnit && body.conversionFactor !== undefined)
+            ? "CONFIGURED"
+            : "NEEDS_REVIEW";
+    return assertUnitDefinition({ unit, baseUnit, unitDimension, conversionFactor, conversionStatus });
+}
+
+function unitError(error: unknown) {
+    if (!(error instanceof Error)) return null;
+    const messages: Record<string, string> = {
+        UNIT_REQUIRED: "Unit dan unit dasar wajib diisi.",
+        UNIT_NOT_SUPPORTED: "Unit tidak tersedia di katalog unit.",
+        INVALID_CONVERSION_FACTOR: "Faktor konversi harus bilangan bulat positif.",
+        BASE_UNIT_DIMENSION_MISMATCH: "Unit dasar tidak sesuai dengan dimensi barang.",
+        CONVERSION_DEFINITION_REQUIRED: "Definisi konversi wajib diisi untuk unit berbeda.",
+        CONVERSION_OVERFLOW: "Hasil konversi terlalu besar.",
+        INVALID_QUANTITY: "Jumlah harus bilangan bulat lebih dari 0.",
+    };
+    return messages[error.message] ?? null;
+}
 
 export async function GET() {
     try {
@@ -61,7 +97,7 @@ export async function POST(request: Request) {
             );
         }
 
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
 
         const campId =
             user.role === "SUPER_ADMIN"
@@ -78,34 +114,51 @@ export async function POST(request: Request) {
             );
         }
 
+        const quantity = Number(body.quantity);
+        const minimumQuantity = Number(body.minimumQuantity ?? 0);
+        if (!Number.isSafeInteger(quantity) || quantity < 0 || !Number.isSafeInteger(minimumQuantity) || minimumQuantity < 0) {
+            return NextResponse.json({ success: false, message: "Jumlah dan batas minimum harus bilangan bulat tidak negatif." }, { status: 400 });
+        }
+        const unitDefinition = parseUnitMetadata(body);
+        const minimumQuantityBase = minimumQuantity === 0 ? 0 : convertToBase(minimumQuantity, unitDefinition);
+
         const camp = await prisma.camp.findUnique({
-            where: { id: campId },
+            where: { id: String(campId) },
         });
 
-        if (!camp) {
-            return NextResponse.json(
-                { success: false, message: "Camp tidak ditemukan." },
-                { status: 404 },
-            );
+        if (!camp || camp.status !== "ACTIVE") {
+            return NextResponse.json({ success: false, message: "Camp tidak ditemukan atau tidak aktif." }, { status: 400 });
         }
 
         const item = await prisma.logisticsItem.create({
             data: {
-                campId,
+                campId: String(campId),
                 itemName: String(body.itemName).trim(),
                 quantity: 0,
-                unit: String(body.unit).trim(),
-                minimumQuantity: Number(body.minimumQuantity ?? 0),
+                reservedQuantity: 0,
+                damagedQuantity: 0,
+                unit: unitDefinition.unit,
+                baseUnit: unitDefinition.baseUnit,
+                unitDimension: unitDefinition.unitDimension,
+                conversionFactor: unitDefinition.conversionFactor,
+                conversionStatus: unitDefinition.conversionStatus,
+                conversionNote: typeof body.conversionNote === "string" ? body.conversionNote.trim() : null,
+                minimumQuantity,
+                quantityBase: 0,
+                reservedQuantityBase: 0,
+                damagedQuantityBase: 0,
+                minimumQuantityBase,
+                status: quantity === 0 ? "CRITICAL" : "SUFFICIENT",
                 notes: body.notes ? String(body.notes).trim() : null,
             },
         });
 
-        const result = Number(body.quantity) > 0
+        const result = quantity > 0
             ? await receiveStock({
                 logisticsItemId: item.id,
-                quantity: Number(body.quantity),
+                quantity,
                 createdById: user.id,
-                reason: body.reason ?? "Stok awal dicatat",
+                reason: typeof body.reason === "string" ? body.reason : "Stok awal dicatat",
             })
             : item;
 
@@ -121,6 +174,8 @@ export async function POST(request: Request) {
         if (isAuthError(error)) {
             return authError(error);
         }
+        const knownUnitError = unitError(error);
+        if (knownUnitError) return NextResponse.json({ success: false, message: knownUnitError }, { status: 400 });
 
         console.error("CREATE_LOGISTICS_ERROR", error);
 
