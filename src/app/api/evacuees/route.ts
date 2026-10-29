@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { parsePagination, paginatedResponse } from "@/lib/pagination";
+import { writeAuditLog } from "@/lib/audit";
+import { isSerializationConflict } from "@/lib/prisma-errors";
+import { isValidTotalFamily } from "@/lib/validation";
 
 export async function GET(request: Request) {
     try {
@@ -10,9 +14,18 @@ export async function GET(request: Request) {
             return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi registrasi posko ini." }, { status: 403 });
         }
 
-        const params = parsePagination(new URL(request.url));
+        const url = new URL(request.url);
+        const params = parsePagination(url);
         const skip = (params.page! - 1) * params.limit!;
-        const where = user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! };
+        const q = url.searchParams.get("q")?.trim();
+        const status = url.searchParams.get("status")?.trim().toUpperCase();
+
+        const baseWhere = user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! };
+        const where: Prisma.EvacueeRecordWhereInput = {
+            ...baseWhere,
+            ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
+            ...(status === "ACTIVE" ? { departedAt: null } : status === "CHECKED_OUT" ? { NOT: { departedAt: null } } : {}),
+        };
 
         const [evacuees, total] = await Promise.all([
             prisma.evacueeRecord.findMany({
@@ -67,8 +80,9 @@ export async function POST(request: Request) {
                 : user.campId;
 
         const totalFamily = Number(body.totalFamily ?? 1);
+        const name = typeof body.name === "string" ? body.name.trim() : "";
 
-        if (!campId || !body.name || totalFamily < 1) {
+        if (!campId || !name || !isValidTotalFamily(totalFamily)) {
             return NextResponse.json(
                 {
                     success: false,
@@ -88,6 +102,10 @@ export async function POST(request: Request) {
                 throw new Error("CAMP_NOT_FOUND");
             }
 
+            if (camp.status !== "ACTIVE") {
+                throw new Error("CAMP_NOT_ACTIVE");
+            }
+
             if (
                 camp.currentOccupants + totalFamily >
                 camp.maxCapacity
@@ -98,7 +116,7 @@ export async function POST(request: Request) {
             const evacuee = await tx.evacueeRecord.create({
                 data: {
                     campId,
-                    name: String(body.name).trim(),
+                    name,
                     totalFamily,
                     hasSpecialNeeds: Boolean(
                         body.hasSpecialNeeds ?? false,
@@ -119,7 +137,9 @@ export async function POST(request: Request) {
             });
 
             return evacuee;
-        });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+        await writeAuditLog({ userId: user.id, action: "CREATE", entity: "EvacueeRecord", entityId: result.id, details: { campId, totalFamily, hasSpecialNeeds: result.hasSpecialNeeds } });
 
         return NextResponse.json(
             {
@@ -139,6 +159,20 @@ export async function POST(request: Request) {
                 return NextResponse.json(
                     { success: false, message: "Camp tidak ditemukan." },
                     { status: 404 },
+                );
+            }
+
+            if (error.message === "CAMP_NOT_ACTIVE") {
+                return NextResponse.json(
+                    { success: false, message: "Posko tidak aktif sehingga tidak dapat menerima pengungsi baru." },
+                    { status: 409 },
+                );
+            }
+
+            if (isSerializationConflict(error)) {
+                return NextResponse.json(
+                    { success: false, message: "Data posko sedang diperbarui pengguna lain. Silakan coba lagi." },
+                    { status: 409 },
                 );
             }
 

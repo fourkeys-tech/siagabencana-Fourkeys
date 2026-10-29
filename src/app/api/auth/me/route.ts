@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export async function GET() {
     const user = await getCurrentUser();
 
     if (!user) {
+        // Bedakan tamu (tanpa cookie) dari sesi yang kedaluwarsa/dicabut.
+        const hasSessionCookie = (await cookies()).has("siaga_session");
         return NextResponse.json(
             {
                 success: false,
                 user: null,
+                code: hasSessionCookie ? "SESSION_EXPIRED" : "NO_SESSION",
             },
             { status: 401 },
         );

@@ -72,7 +72,8 @@ export function Modal({
 				bodyOverflowBeforeModal = null;
 			}
 			if (previouslyFocused.current && document.contains(previouslyFocused.current)) {
-				previouslyFocused.current.focus();
+				// Tanpa scroll: jangan ganggu scroll yang dipicu aksi penutup modal.
+				previouslyFocused.current.focus({ preventScroll: true });
 			}
 			previouslyFocused.current = null;
 		};

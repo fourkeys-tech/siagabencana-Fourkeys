@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
-
-const PROBLEM_LOGISTICS = ["LOW", "CRITICAL", "SPOILED_OR_DAMAGED"];
-const PROBLEM_FACILITIES = ["DAMAGED", "REPAIRING"];
+import {
+    CRITICAL_LOGISTICS_STATUSES,
+    DAMAGED_FACILITY_STATUSES,
+    NEAR_FULL_OCCUPANCY_PERCENTAGE,
+    PROBLEM_FACILITY_STATUSES,
+    PROBLEM_LOGISTICS_STATUSES,
+} from "@/lib/status-groups";
 
 type Warning = {
     type: "OCCUPANCY" | "LOGISTICS" | "FACILITY";
@@ -36,9 +40,10 @@ export async function GET() {
                 facilities: {
                     select: { status: true },
                 },
-                evacuees: {
-                    where: { departedAt: null },
-                    select: { id: true },
+                _count: {
+                    select: {
+                        evacuees: { where: { departedAt: null } },
+                    },
                 },
             },
             orderBy: { name: "asc" },
@@ -50,19 +55,19 @@ export async function GET() {
 
         const data = camps.map((camp) => {
             const problemLogistics = camp.logistics.filter((item) =>
-                PROBLEM_LOGISTICS.includes(item.status),
+                PROBLEM_LOGISTICS_STATUSES.includes(item.status),
             );
 
-            const criticalLogistics = camp.logistics.filter(
-                (item) => item.status === "CRITICAL",
+            const criticalLogistics = camp.logistics.filter((item) =>
+                CRITICAL_LOGISTICS_STATUSES.includes(item.status),
             ).length;
 
             const problemFacilities = camp.facilities.filter((facility) =>
-                PROBLEM_FACILITIES.includes(facility.status),
+                PROBLEM_FACILITY_STATUSES.includes(facility.status),
             );
 
-            const damagedFacilities = camp.facilities.filter(
-                (facility) => facility.status === "DAMAGED",
+            const damagedFacilities = camp.facilities.filter((facility) =>
+                DAMAGED_FACILITY_STATUSES.includes(facility.status),
             ).length;
 
             const occupancyPercentage =
@@ -77,7 +82,7 @@ export async function GET() {
                     : 0;
 
             if (camp.status === "ACTIVE") {
-                if (occupancyPercentage >= 90) {
+                if (occupancyPercentage >= NEAR_FULL_OCCUPANCY_PERCENTAGE) {
                     occupancyWarnings.push({
                         type: "OCCUPANCY",
                         campId: camp.id,
@@ -117,10 +122,12 @@ export async function GET() {
                 status: camp.status,
                 maxCapacity: camp.maxCapacity,
                 currentOccupants: camp.currentOccupants,
-                availableCapacity:
+                availableCapacity: Math.max(
                     camp.maxCapacity - camp.currentOccupants,
+                    0,
+                ),
                 occupancyPercentage,
-                activeEvacuees: camp.evacuees.length,
+                activeEvacuees: camp._count.evacuees,
                 logisticsTotal: camp.logistics.length,
                 problemLogistics: problemLogistics.length,
                 criticalLogistics,

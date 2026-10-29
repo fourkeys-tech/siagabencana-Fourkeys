@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
@@ -40,7 +41,7 @@ export async function createSession(userId: string) {
     });
 }
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async () => {
     const cookieStore = await cookies();
 
     const token = cookieStore.get(SESSION_COOKIE)?.value;
@@ -55,12 +56,42 @@ export async function getCurrentUser() {
         where: {
             tokenHash,
         },
-        include: {
+        select: {
+            id: true,
+            expiresAt: true,
             user: {
-                include: {
-                    camp: { include: { divisionHeads: { include: { user: { select: { id: true, name: true, division: true } } } } } },
-                    managedCamp: { select: { id: true, name: true } },
-                    divisionHeadAssignments: { include: { camp: { select: { id: true, name: true } } } },
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    role: true,
+                    division: true,
+                    campId: true,
+                    camp: {
+                        select: {
+                            id: true,
+                            name: true,
+                            status: true,
+                        },
+                    },
+                    managedCamp: {
+                        select: {
+                            id: true,
+                            name: true,
+                        },
+                    },
+                    divisionHeadAssignments: {
+                        select: {
+                            campId: true,
+                            division: true,
+                            camp: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                },
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -71,7 +102,8 @@ export async function getCurrentUser() {
     }
 
     if (session.expiresAt < new Date()) {
-        await prisma.session.delete({
+        // deleteMany: request paralel dengan sesi yang sama tidak gagal P2025.
+        await prisma.session.deleteMany({
             where: {
                 id: session.id,
             },
@@ -81,6 +113,24 @@ export async function getCurrentUser() {
     }
 
     return session.user;
+});
+
+// Cabut semua sesi user (mis. setelah password direset oleh admin/manager).
+export async function deleteUserSessions(userId: string) {
+    await prisma.session.deleteMany({ where: { userId } });
+}
+
+// Cabut sesi lain milik user, pertahankan sesi pada perangkat saat ini.
+export async function deleteOtherSessions(userId: string) {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
+
+    await prisma.session.deleteMany({
+        where: {
+            userId,
+            ...(token ? { NOT: { tokenHash: hashToken(token) } } : {}),
+        },
+    });
 }
 
 export async function deleteSession() {

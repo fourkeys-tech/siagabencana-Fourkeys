@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FormField } from "@/components/ui/form-field";
 import { ActionMenu } from "@/components/ui/action-menu";
+import { useSession } from "@/components/auth/user-provider";
 import type { CampLocation } from "@/components/camps/camp-location-picker";
 
 const CampLocationPicker = dynamic(
@@ -35,6 +37,9 @@ function locationLabel(location: CampLocation | null) {
 }
 
 export default function CampsPage() {
+	const { user } = useSession();
+	// API tambah/edit/tutup/hapus posko hanya untuk Super Admin.
+	const canManageCamps = user?.role === "SUPER_ADMIN";
 	const [camps, setCamps] = useState<Camp[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
@@ -42,6 +47,13 @@ export default function CampsPage() {
 	const [busy, setBusy] = useState(false);
 	const [formData, setFormData] = useState(initialForm);
 	const [location, setLocation] = useState<CampLocation | null>(null);
+	const [confirmAction, setConfirmAction] = useState<{
+		title: string;
+		message: string;
+		confirmLabel?: string;
+		variant?: "primary" | "danger";
+		onConfirm: () => void | Promise<void>;
+	} | null>(null);
 
 	const loadData = useCallback(async () => {
 		setLoading(true);
@@ -95,8 +107,7 @@ export default function CampsPage() {
 		}
 	};
 
-	const handleDelete = async (id: string, name: string) => {
-		if (!confirm(`Hapus posko "${name}"?`)) return;
+	const executeDelete = async (id: string) => {
 		setBusy(true);
 		setError("");
 		try {
@@ -111,7 +122,17 @@ export default function CampsPage() {
 		}
 	};
 
-	const handleStatusToggle = async (camp: Camp) => {
+	const handleDelete = (id: string, name: string) => {
+		setConfirmAction({
+			title: "Hapus Posko",
+			message: `Apakah Anda yakin ingin menghapus posko "${name}"? Tindakan ini tidak dapat dibatalkan.`,
+			confirmLabel: "Hapus Posko",
+			variant: "danger",
+			onConfirm: () => executeDelete(id),
+		});
+	};
+
+	const executeStatusToggle = async (camp: Camp) => {
 		setBusy(true);
 		setError("");
 		try {
@@ -126,12 +147,42 @@ export default function CampsPage() {
 		}
 	};
 
+	const handleStatusToggle = (camp: Camp) => {
+		if (camp.status === "ACTIVE") {
+			setConfirmAction({
+				title: "Tutup Posko",
+				message: `Tutup posko "${camp.name}"? Posko yang ditutup tidak dapat menerima mutasi stok atau pengungsi baru.`,
+				confirmLabel: "Tutup Posko",
+				variant: "danger",
+				onConfirm: () => executeStatusToggle(camp),
+			});
+		} else {
+			void executeStatusToggle(camp);
+		}
+	};
+
 	return (
 		<div className="space-y-6">
-			<div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-600">Manajemen lokasi</p><h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">Kelola Posko</h1><p className="mt-2 text-sm text-slate-500">Tambah lokasi dengan memilih titik langsung pada peta agar alamat posko lebih akurat.</p></div><Button onClick={() => { resetForm(); setError(""); setShowModal(true); }}>+ Tambah Posko</Button></div>
+			<div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="mb-2 text-xs font-bold uppercase tracking-wider text-blue-600">Manajemen lokasi</p><h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">Kelola Posko</h1><p className="mt-2 text-sm text-slate-500">{canManageCamps ? "Tambah lokasi dengan memilih titik langsung pada peta agar alamat posko lebih akurat." : "Data posko tempat Anda bertugas."}</p></div>{canManageCamps && <Button onClick={() => { resetForm(); setError(""); setShowModal(true); }}>+ Tambah Posko</Button>}</div>
 			{error && <Alert type="error">{error}</Alert>}
-			{loading ? <div className="flex h-64 items-center justify-center text-sm text-slate-500">Memuat posko...</div> : <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto" role="region" aria-label="Daftar posko" tabIndex={0}><table className="min-w-[52rem] divide-y divide-slate-200"><thead className="bg-slate-50"><tr>{["Nama", "Alamat", "Kapasitas", "Status", "Aksi"].map((label) => <th key={label} className="whitespace-nowrap px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{camps.map((camp) => <tr key={camp.id} className="hover:bg-slate-50"><td className="px-5 py-4"><Link href={`/kelola-posko/${camp.id}`} className="text-sm font-bold text-slate-900 hover:text-blue-600 hover:underline">{camp.name}</Link></td><td className="max-w-xs px-5 py-4 text-sm text-slate-600">{camp.address}</td><td className="px-5 py-4 text-sm text-slate-600">{camp.currentOccupants}/{camp.maxCapacity}</td><td className="px-5 py-4"><Badge label={camp.status} /></td><td className="px-5 py-4"><ActionMenu label={camp.name} disabled={busy} items={[{ label: "Detail", href: `/kelola-posko/${camp.id}` }, { label: "Edit", href: `/kelola-posko/${camp.id}/edit` }, { label: camp.status === "ACTIVE" ? "Tutup posko" : "Buka posko", onSelect: () => void handleStatusToggle(camp) }, { label: "Hapus", danger: true, onSelect: () => void handleDelete(camp.id, camp.name) }]} /></td></tr>)}{camps.length === 0 && <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-500">Belum ada posko.</td></tr>}</tbody></table></div></div>}
+			{loading ? <div className="flex h-64 items-center justify-center text-sm text-slate-500">Memuat posko...</div> : <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto" role="region" aria-label="Daftar posko" tabIndex={0}><table className="min-w-[52rem] divide-y divide-slate-200"><thead className="bg-slate-50"><tr>{["Nama", "Alamat", "Kapasitas", "Status", "Aksi"].map((label) => <th key={label} className="whitespace-nowrap px-5 py-3.5 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{camps.map((camp) => <tr key={camp.id} className="hover:bg-slate-50"><td className="px-5 py-4"><Link href={`/kelola-posko/${camp.id}`} className="text-sm font-bold text-slate-900 hover:text-blue-600 hover:underline">{camp.name}</Link></td><td className="max-w-xs px-5 py-4 text-sm text-slate-600">{camp.address}</td><td className="px-5 py-4 text-sm text-slate-600">{camp.currentOccupants}/{camp.maxCapacity}</td><td className="px-5 py-4"><Badge label={camp.status} /></td><td className="px-5 py-4"><ActionMenu label={camp.name} disabled={busy} items={canManageCamps ? [{ label: "Detail", href: `/kelola-posko/${camp.id}` }, { label: "Edit", href: `/kelola-posko/${camp.id}/edit` }, { label: camp.status === "ACTIVE" ? "Tutup posko" : "Buka posko", onSelect: () => void handleStatusToggle(camp) }, { label: "Hapus", danger: true, onSelect: () => void handleDelete(camp.id, camp.name) }] : [{ label: "Detail", href: `/kelola-posko/${camp.id}` }]} /></td></tr>)}{camps.length === 0 && <tr><td colSpan={5} className="px-5 py-12 text-center text-sm text-slate-500">Belum ada posko.</td></tr>}</tbody></table></div></div>}
 			<Modal isOpen={showModal} onClose={() => !busy && setShowModal(false)} title="Tambah Posko"><form onSubmit={handleCreate} className="space-y-3"><FormField label="Nama Posko" value={formData.name} onChange={(value) => setFormData({ ...formData, name: value })} placeholder="Contoh: Posko Balai Desa Candi" required /><FormField label="Alamat" value={formData.address} onChange={(value) => setFormData({ ...formData, address: value })} placeholder="Jalan, desa, kecamatan, kabupaten" required /><FormField label="Kapasitas Maksimal" type="number" value={formData.maxCapacity} onChange={(value) => setFormData({ ...formData, maxCapacity: value })} placeholder="200" required /><div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><div className="mb-3"><p className="text-sm font-bold text-slate-800">Tentukan titik lokasi</p><p className="mt-1 text-xs leading-5 text-slate-500">Klik lokasi posko pada peta atau geser pin ke titik yang tepat.</p></div><CampLocationPicker value={location} onChange={setLocation} /><p className="mt-3 text-xs font-semibold text-slate-600">Titik terpilih: {locationLabel(location)}</p></div><div className="flex justify-end gap-2 pt-2"><Button type="button" variant="secondary" onClick={() => setShowModal(false)} disabled={busy}>Batal</Button><Button type="submit" disabled={busy || !location}>{busy ? "Menyimpan..." : "Simpan Posko"}</Button></div></form></Modal>
+			{confirmAction && (
+				<ConfirmDialog
+					isOpen={Boolean(confirmAction)}
+					title={confirmAction.title}
+					message={confirmAction.message}
+					confirmLabel={confirmAction.confirmLabel}
+					variant={confirmAction.variant}
+					busy={busy}
+					onConfirm={async () => {
+						const action = confirmAction.onConfirm;
+						await action();
+						setConfirmAction(null);
+					}}
+					onClose={() => setConfirmAction(null)}
+				/>
+			)}
 		</div>
 	);
 }

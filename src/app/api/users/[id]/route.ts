@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
+import { authError, canAssignRole, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { writeAuditLog } from "@/lib/audit";
+import { isForeignKeyError, isUniqueConstraintError } from "@/lib/prisma-errors";
+import { deleteOtherSessions, deleteUserSessions } from "@/lib/auth/session";
+import { assertCampActive, campError } from "@/lib/camps";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { isValidEmail, MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, validatePassword, validateText } from "@/lib/validation";
 
 type Params = {
     params: Promise<{
@@ -89,7 +94,7 @@ export async function PUT(
         if (!managerEditing && currentUser.role !== "SUPER_ADMIN") {
             return NextResponse.json({ success: false, message: "Tidak memiliki akses untuk mengedit anggota." }, { status: 403 });
         }
-        const body = await request.json() as Record<string, unknown>;
+        const body = await readJson(request);
 
         const existingUser = await prisma.user.findUnique({
             where: { id },
@@ -143,8 +148,8 @@ export async function PUT(
         if (role !== "SUPER_ADMIN" && !campId) {
             return NextResponse.json({ success: false, message: "Manager, ketua divisi, dan Field Officer wajib ditugaskan ke posko." }, { status: 400 });
         }
-        if (managerEditing && role === "MANAGER") {
-            return NextResponse.json({ success: false, message: "Manager tidak dapat mengubah anggota menjadi Manager." }, { status: 403 });
+        if (!canAssignRole(currentUser, role)) {
+            return NextResponse.json({ success: false, message: "Manager hanya dapat menetapkan role ketua divisi atau Field Officer." }, { status: 403 });
         }
         if (managerEditing && campId !== currentUser.campId) {
             return NextResponse.json({ success: false, message: "Manager tidak dapat memindahkan anggota ke posko lain." }, { status: 403 });
@@ -167,19 +172,7 @@ export async function PUT(
         }
 
         if (campId) {
-            const camp = await prisma.camp.findUnique({
-                where: { id: campId },
-            });
-
-            if (!camp) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Camp tidak ditemukan.",
-                    },
-                    { status: 404 },
-                );
-            }
+            await assertCampActive(campId);
         }
 
         const data: {
@@ -192,6 +185,8 @@ export async function PUT(
         } = {};
 
         if (body.name !== undefined) {
+            const nameError = validateText(body.name, "Nama", MAX_NAME_LENGTH);
+            if (nameError) return NextResponse.json({ success: false, message: nameError }, { status: 400 });
             data.name = String(body.name).trim();
         }
 
@@ -199,6 +194,10 @@ export async function PUT(
             const normalizedEmail = String(body.email)
                 .trim()
                 .toLowerCase();
+
+            if (!normalizedEmail || normalizedEmail.length > MAX_EMAIL_LENGTH || !isValidEmail(normalizedEmail)) {
+                return NextResponse.json({ success: false, message: "Format email tidak valid." }, { status: 400 });
+            }
 
             const emailOwner = await prisma.user.findFirst({
                 where: {
@@ -221,6 +220,10 @@ export async function PUT(
         }
 
         if (body.password) {
+            const passwordError = validatePassword(body.password);
+            if (passwordError) {
+                return NextResponse.json({ success: false, message: passwordError }, { status: 400 });
+            }
             data.password = await bcrypt.hash(
                 String(body.password),
                 12,
@@ -269,7 +272,10 @@ export async function PUT(
             return updated;
         });
 
-        await writeAuditLog({ userId: currentUser.id, action: "UPDATE", entity: "User", entityId: id, details: { name: user.name, role: user.role } });
+        // Password direset oleh admin/manager: paksa user login ulang di semua perangkat.
+        if (data.password) await (id === currentUser.id ? deleteOtherSessions(id) : deleteUserSessions(id));
+
+        await writeAuditLog({ userId: currentUser.id, action: "UPDATE", entity: "User", entityId: id, details: { name: user.name, role: user.role, passwordReset: Boolean(data.password) } });
 
         return NextResponse.json({
             success: true,
@@ -277,6 +283,12 @@ export async function PUT(
             data: user,
         });
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
+        if (isUniqueConstraintError(error)) {
+            return NextResponse.json({ success: false, message: "Email sudah digunakan." }, { status: 409 });
+        }
+        const knownCampError = campError(error);
+        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
         if (error instanceof Error && error.message === "CAMP_MANAGER_EXISTS") return NextResponse.json({ success: false, message: "Posko tersebut sudah memiliki manager." }, { status: 409 });
         if (error instanceof Error && error.message === "DIVISION_HEAD_EXISTS") return NextResponse.json({ success: false, message: "Divisi tersebut sudah memiliki ketua di posko ini." }, { status: 409 });
         if (isAuthError(error)) {
@@ -325,6 +337,18 @@ export async function DELETE(
             );
         }
 
+        // Relasi createdBy bersifat Restrict: user dengan riwayat transaksi tidak boleh dihapus.
+        const [requestCount, distributionCount] = await Promise.all([
+            prisma.logisticsRequest.count({ where: { createdById: id } }),
+            prisma.distribution.count({ where: { createdById: id } }),
+        ]);
+        if (requestCount > 0 || distributionCount > 0) {
+            return NextResponse.json(
+                { success: false, message: "User memiliki riwayat transaksi distribusi sehingga tidak dapat dihapus. Ubah role atau posko user tersebut." },
+                { status: 409 },
+            );
+        }
+
         await prisma.user.delete({
             where: { id },
         });
@@ -338,6 +362,12 @@ export async function DELETE(
     } catch (error) {
         if (isAuthError(error)) {
             return authError(error, "Hanya Super Admin.");
+        }
+        if (isForeignKeyError(error)) {
+            return NextResponse.json(
+                { success: false, message: "User masih terhubung dengan data lain sehingga tidak dapat dihapus." },
+                { status: 409 },
+            );
         }
 
         console.error("DELETE_USER_ERROR", error);

@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { occupancyBarClass } from "@/lib/occupancy";
+import { apiGet } from "@/lib/api-client";
+import { usePolling } from "@/lib/use-polling";
 import type { MapCamp } from "@/components/public/camp-map";
 
 const CampMap = dynamic(
@@ -26,25 +29,28 @@ type MonitoringCamp = MapCamp & {
 	activeEvacuees: number;
 };
 
+interface MonitoringResponseData {
+	camps: MonitoringCamp[];
+}
+
 export default function PetaPage() {
 	const [camps, setCamps] = useState<MonitoringCamp[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
 	const [activeId, setActiveId] = useState<string | null>(null);
 
-	useEffect(() => {
-		fetch("/api/monitoring")
-			.then((res) => res.json())
-			.then((data) => {
-				if (data.success) {
-					setCamps(data.data.camps);
-				} else {
-					setError("Gagal memuat data peta");
-				}
-			})
-			.catch(() => setError("Terjadi kesalahan"))
-			.finally(() => setLoading(false));
+	const loadData = useCallback(async () => {
+		const res = await apiGet<MonitoringResponseData>("/api/monitoring");
+		if (res.ok && res.data) {
+			setCamps(res.data.camps);
+			setError("");
+		} else {
+			setError(res.message ?? "Gagal memuat data peta.");
+		}
+		setLoading(false);
 	}, []);
+
+	usePolling(loadData, 30_000);
 
 	const popupExtra = useMemo(() => {
 		return (camp: MapCamp) => {
@@ -53,32 +59,39 @@ export default function PetaPage() {
 			if (!detail) return "";
 
 			return `
-					<p style="margin:4px 0">
-						Logistik bermasalah: ${detail.problemLogistics}
-					</p>
-					<p style="margin:4px 0">
-						Fasilitas bermasalah: ${detail.problemFacilities}
-					</p>
-					<p style="margin:4px 0">
-						Pengungsi aktif: ${detail.activeEvacuees}
-					</p>
-				`;
+				<p style="margin:4px 0">
+					Logistik bermasalah: ${detail.problemLogistics}
+				</p>
+				<p style="margin:4px 0">
+					Fasilitas bermasalah: ${detail.problemFacilities}
+				</p>
+				<p style="margin:4px 0">
+					Pengungsi aktif: ${detail.activeEvacuees}
+				</p>
+			`;
 		};
 	}, [camps]);
 
 	if (loading) {
 		return (
-			<div className="flex items-center justify-center h-64">
-				<span className="text-gray-500 text-lg">Memuat...</span>
+			<div className="flex h-64 items-center justify-center">
+				<span className="text-lg text-gray-500">Memuat...</span>
 			</div>
 		);
 	}
 
 	return (
 		<div className="space-y-6">
-			<h1 className="text-2xl font-bold text-gray-900">
-				Peta Bencana
-			</h1>
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+				<h1 className="text-2xl font-bold text-gray-900">
+					Peta Bencana
+				</h1>
+				{error && (
+					<Button variant="secondary" onClick={() => void loadData()}>
+						Coba Lagi
+					</Button>
+				)}
+			</div>
 
 			{error && <Alert type="error">{error}</Alert>}
 
@@ -87,7 +100,7 @@ export default function PetaPage() {
 					<Card className="p-0">
 						{camps.length === 0 ? (
 							<p className="p-4 text-sm text-gray-500">
-								Belum ada data posko.
+								{error ? "Data posko tidak dapat dimuat." : "Belum ada data posko."}
 							</p>
 						) : (
 							<ul className="divide-y divide-gray-100">
@@ -96,10 +109,11 @@ export default function PetaPage() {
 										<button
 											type="button"
 											onClick={() => setActiveId(camp.id)}
-											className={`w-full px-4 py-3 text-left transition-colors ${activeId === camp.id
-												? "bg-blue-50"
-												: "hover:bg-gray-50"
-												}`}
+											className={`w-full px-4 py-3 text-left transition-colors ${
+												activeId === camp.id
+													? "bg-blue-50"
+													: "hover:bg-gray-50"
+											}`}
 										>
 											<div className="flex items-center justify-between gap-2">
 												<span className="text-sm font-medium text-gray-900">

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, LogOut, Circle } from "lucide-react";
 import { useSession } from "@/components/auth/user-provider";
 import { NAV_SECTIONS, isItemVisible } from "@/lib/navigation";
@@ -20,6 +20,29 @@ export function Sidebar({
 	const router = useRouter();
 	const { user, refresh } = useSession();
 	const [loggingOut, setLoggingOut] = useState(false);
+	const [isDesktop, setIsDesktop] = useState(false);
+
+	useEffect(() => {
+		const mql = window.matchMedia("(min-width: 1024px)");
+		setIsDesktop(mql.matches);
+		const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+		mql.addEventListener("change", handler);
+		return () => mql.removeEventListener("change", handler);
+	}, []);
+
+	useEffect(() => {
+		if (!mobileOpen) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		document.body.style.overflow = "hidden";
+		return () => {
+			window.removeEventListener("keydown", onKeyDown);
+			document.body.style.overflow = "";
+		};
+	}, [mobileOpen, onClose]);
+
 	const sections = NAV_SECTIONS.map((section) => ({
 		...section,
 		items: section.items.filter((item) => isItemVisible(item, user)),
@@ -42,7 +65,7 @@ export function Sidebar({
 	return (
 		<>
 			{mobileOpen && <button type="button" aria-label="Tutup menu navigasi" onClick={onClose} className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden" />}
-			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={!mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,20rem)] max-w-full flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:w-72 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
+			<aside id="app-navigation" aria-label="Navigasi utama" aria-hidden={isDesktop ? undefined : !mobileOpen} className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,20rem)] max-w-full flex-col bg-[var(--sidebar)] text-white shadow-2xl transition-transform duration-200 lg:w-72 lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
 				<div className="flex h-20 w-full items-center border-b border-white/10 px-5 overflow-hidden">
 					<Link
 						href="/dashboard"

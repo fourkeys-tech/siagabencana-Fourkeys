@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { PROBLEM_FACILITY_STATUSES, PROBLEM_LOGISTICS_STATUSES } from "@/lib/status-groups";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 function availabilityFor(occupancyPercentage: number) {
 	if (occupancyPercentage >= 100) return "FULL" as const;
@@ -10,7 +11,7 @@ function availabilityFor(occupancyPercentage: number) {
 }
 
 function latestDate(values: Date[]) {
-	return values.reduce((latest, value) => value > latest ? value : latest, new Date(0)).toISOString();
+	return values.reduce((latest, value) => (value > latest ? value : latest), new Date(0)).toISOString();
 }
 
 export async function GET() {
@@ -72,12 +73,15 @@ export async function GET() {
 			availableCamps: data.filter((camp) => camp.availability === "AVAILABLE").length,
 			limitedCamps: data.filter((camp) => camp.availability === "LIMITED").length,
 			fullCamps: data.filter((camp) => camp.availability === "FULL").length,
-			criticalLogistics: data.reduce((sum, camp) => sum + camp.logistics.filter((item) => ["LOW", "CRITICAL", "SPOILED_OR_DAMAGED"].includes(item.status)).length, 0),
-			damagedFacilities: data.reduce((sum, camp) => sum + camp.facilities.filter((facility) => ["DAMAGED", "REPAIRING"].includes(facility.status)).length, 0),
+			criticalLogistics: data.reduce((sum, camp) => sum + camp.logistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length, 0),
+			damagedFacilities: data.reduce((sum, camp) => sum + camp.facilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length, 0),
 			lastUpdatedAt: data.length > 0 ? latestDate(data.map((camp) => new Date(camp.lastUpdatedAt))) : null,
 		};
 
-		return NextResponse.json({ success: true, data: { summary, camps } }, { headers: { "Cache-Control": "no-store" } });
+		return NextResponse.json(
+			{ success: true, data: { summary, camps: data } },
+			{ headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120" } },
+		);
 	} catch (error) {
 		console.error("PUBLIC_OVERVIEW_ERROR", error);
 		return NextResponse.json({ success: false, message: "Gagal mengambil data overview." }, { status: 500 });

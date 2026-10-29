@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, canManageDivision, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { PROBLEM_FACILITY_STATUSES, PROBLEM_LOGISTICS_STATUSES } from "@/lib/status-groups";
 
 function parseDate(value: string | null, endOfDay = false) {
 	if (!value) return null;
@@ -38,6 +39,13 @@ export async function GET(request: Request) {
 		}
 
 		const campWhere = getAccessibleCampWhere(user);
+		const canViewEvacueeNames = user.role === "SUPER_ADMIN" || user.role === "MANAGER" || Boolean(user.campId && canManageDivision(user, "DATA_REGISTRATION", user.campId));
+
+		const hasDateFilter = url.searchParams.has("from") || url.searchParams.has("to");
+		const effectiveFrom = from ?? (hasDateFilter ? null : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+		const effectiveTo = to ?? (hasDateFilter ? null : new Date());
+		const period = effectiveFrom || effectiveTo ? { gte: effectiveFrom ?? undefined, lte: effectiveTo ?? undefined } : undefined;
+
 		const camps = await prisma.camp.findMany({
 			where: campWhere,
 			select: {
@@ -50,7 +58,6 @@ export async function GET(request: Request) {
 			orderBy: { name: "asc" },
 		});
 		const campIds = camps.map((camp) => camp.id);
-		const period = from || to ? { gte: from ?? undefined, lte: to ?? undefined } : undefined;
 
 		const [evacuees, logistics, facilities, distributions] = await Promise.all([
 			prisma.evacueeRecord.findMany({
@@ -60,7 +67,7 @@ export async function GET(request: Request) {
 				},
 				select: {
 					id: true,
-					name: true,
+					...(canViewEvacueeNames ? { name: true } : {}),
 					totalFamily: true,
 					hasSpecialNeeds: true,
 					arrivedAt: true,
@@ -126,12 +133,31 @@ export async function GET(request: Request) {
 			}),
 		]);
 
+		const evacueesByCamp = new Map<string, typeof evacuees>();
+		for (const record of evacuees) {
+			const list = evacueesByCamp.get(record.camp.id);
+			if (list) list.push(record);
+			else evacueesByCamp.set(record.camp.id, [record]);
+		}
+		const logisticsByCamp = new Map<string, typeof logistics>();
+		for (const item of logistics) {
+			const list = logisticsByCamp.get(item.camp.id);
+			if (list) list.push(item);
+			else logisticsByCamp.set(item.camp.id, [item]);
+		}
+		const facilitiesByCamp = new Map<string, typeof facilities>();
+		for (const facility of facilities) {
+			const list = facilitiesByCamp.get(facility.camp.id);
+			if (list) list.push(facility);
+			else facilitiesByCamp.set(facility.camp.id, [facility]);
+		}
+
 		const totalCapacity = camps.reduce((sum, camp) => sum + camp.maxCapacity, 0);
 		const totalOccupants = camps.reduce((sum, camp) => sum + camp.currentOccupants, 0);
 		const campRows = camps.map((camp) => {
-			const campEvacuees = evacuees.filter((record) => record.camp.id === camp.id);
-			const campLogistics = logistics.filter((item) => item.camp.id === camp.id);
-			const campFacilities = facilities.filter((facility) => facility.camp.id === camp.id);
+			const campEvacuees = evacueesByCamp.get(camp.id) ?? [];
+			const campLogistics = logisticsByCamp.get(camp.id) ?? [];
+			const campFacilities = facilitiesByCamp.get(camp.id) ?? [];
 
 			return {
 				...camp,
@@ -142,8 +168,8 @@ export async function GET(request: Request) {
 				evacueeFamilies: campEvacuees.reduce((sum, record) => sum + record.totalFamily, 0),
 				logisticsItems: campLogistics.length,
 				logisticsQuantity: campLogistics.reduce((sum, item) => sum + item.quantity, 0),
-				problemLogistics: campLogistics.filter((item) => ["LOW", "CRITICAL", "SPOILED_OR_DAMAGED"].includes(item.status)).length,
-				damagedFacilities: campFacilities.filter((facility) => ["DAMAGED", "REPAIRING"].includes(facility.status)).length,
+				problemLogistics: campLogistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
+				damagedFacilities: campFacilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
 			};
 		});
 
@@ -151,8 +177,8 @@ export async function GET(request: Request) {
 			success: true,
 			data: {
 				period: {
-					from: from?.toISOString() ?? null,
-					to: to?.toISOString() ?? null,
+					from: (effectiveFrom ?? from)?.toISOString() ?? null,
+					to: (effectiveTo ?? to)?.toISOString() ?? null,
 				},
 				summary: {
 					totalCamps: camps.length,
@@ -166,13 +192,14 @@ export async function GET(request: Request) {
 					specialNeeds: evacuees.filter((record) => record.hasSpecialNeeds).length,
 					logisticsItems: logistics.length,
 					logisticsQuantity: logistics.reduce((sum, item) => sum + item.quantity, 0),
-					criticalLogistics: logistics.filter((item) => ["LOW", "CRITICAL", "SPOILED_OR_DAMAGED"].includes(item.status)).length,
-					damagedFacilities: facilities.filter((facility) => ["DAMAGED", "REPAIRING"].includes(facility.status)).length,
+					criticalLogistics: logistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
+					damagedFacilities: facilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
 					distributions: distributions.length,
 					receivedDistributions: distributions.filter((distribution) => distribution.status === "RECEIVED").length,
 				},
 				camps: campRows,
-				evacuees,
+				canViewEvacueeNames,
+				evacuees: canViewEvacueeNames ? evacuees : [],
 				logistics,
 				facilities,
 				distributions,

@@ -44,6 +44,13 @@ export function canManageCamp(
 	return user.role === "SUPER_ADMIN" || Boolean(user.campId && user.campId === campId);
 }
 
+// Role yang boleh diberikan oleh editor: Super Admin bebas, Manager hanya ketua/petugas.
+export function canAssignRole(editor: { role: Role }, role: Role) {
+	if (editor.role === "SUPER_ADMIN") return true;
+	if (editor.role === "MANAGER") return role === "DIVISION_HEAD" || role === "FIELD_OFFICER";
+	return false;
+}
+
 /**
  * Mengembalikan filter Prisma untuk camp yang dapat diakses oleh user.
  * SUPER_ADMIN dapat mengakses semua camp (undefined).

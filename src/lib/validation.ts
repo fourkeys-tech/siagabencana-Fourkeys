@@ -62,6 +62,55 @@ function requireBoolean(input: unknown, field: string): boolean {
 	fail(`${field}_NOT_BOOLEAN`);
 }
 
+export const PASSWORD_MIN_LENGTH = 8;
+
+// Kebijakan password konsisten untuk create user, edit user, dan ubah profil.
+export function validatePassword(input: unknown): string | null {
+	if (typeof input !== "string") return "Password harus berupa teks.";
+	if (input.length < PASSWORD_MIN_LENGTH) return `Password minimal ${PASSWORD_MIN_LENGTH} karakter.`;
+	if (input.length > 128) return "Password maksimal 128 karakter.";
+	return null;
+}
+
+// Jumlah anggota keluarga harus bilangan bulat ≥ 1 (NaN, desimal, 0 ditolak).
+export function isValidTotalFamily(input: unknown) {
+	const value = Number(input);
+	return Number.isSafeInteger(value) && value >= 1;
+}
+
+export const MAX_NAME_LENGTH = 120;
+export const MAX_NOTE_LENGTH = 1000;
+export const MAX_EMAIL_LENGTH = 254;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmail(input: unknown): input is string {
+	return typeof input === "string" && input.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(input);
+}
+
+// Teks wajib: trim, tidak kosong, tidak melebihi batas. Mengembalikan pesan error atau null.
+export function validateText(input: unknown, label: string, maxLength = MAX_NAME_LENGTH): string | null {
+	if (typeof input !== "string" || !input.trim()) return `${label} wajib diisi.`;
+	if (input.trim().length > maxLength) return `${label} maksimal ${maxLength} karakter.`;
+	return null;
+}
+
+// Teks opsional (notes, alasan): boleh kosong, tetap dibatasi panjangnya.
+export function validateOptionalText(input: unknown, label: string, maxLength = MAX_NOTE_LENGTH): string | null {
+	if (input === undefined || input === null || input === "") return null;
+	if (typeof input !== "string") return `${label} harus berupa teks.`;
+	if (input.trim().length > maxLength) return `${label} maksimal ${maxLength} karakter.`;
+	return null;
+}
+
+// Boolean dari JSON/form: hanya true/false atau "true"/"false"; selain itu undefined.
+export function parseBoolean(input: unknown): boolean | undefined {
+	if (typeof input === "boolean") return input;
+	if (input === "true") return true;
+	if (input === "false") return false;
+	return undefined;
+}
+
 // Mapping error code ke pesan user-friendly (Bahasa Indonesia).
 export const validationMessages: Record<string, string> = {
 	NAME_NOT_STRING: "Nama harus berupa teks.",

@@ -3,44 +3,73 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { writeAuditLog } from "@/lib/audit";
+import { assertCampActive, campError } from "@/lib/camps";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { isUniqueConstraintError } from "@/lib/prisma-errors";
+import { paginatedResponse, parsePagination } from "@/lib/pagination";
+import { isValidEmail, MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, validatePassword, validateText } from "@/lib/validation";
+import type { Prisma } from "@prisma/client";
 
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const currentUser = await requireAuth();
         if (currentUser.role !== "SUPER_ADMIN" && currentUser.role !== "MANAGER") {
             return NextResponse.json({ success: false, message: "Tidak memiliki akses ke daftar anggota." }, { status: 403 });
         }
 
-        const users = await prisma.user.findMany({
-            where: currentUser.role === "MANAGER"
-                ? { campId: currentUser.campId ?? "", role: { in: ["DIVISION_HEAD", "FIELD_OFFICER"] } }
-                : undefined,
-            orderBy: {
-                createdAt: "desc",
-            },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                role: true,
-                division: true,
-                campId: true,
-                camp: {
-                    select: {
-                        id: true,
-                        name: true,
-                    },
-                },
-                createdAt: true,
-                updatedAt: true,
-            },
-        });
+        const url = new URL(request.url);
+        const params = parsePagination(url, 50, 100);
+        const skip = (params.page! - 1) * params.limit!;
+        const q = url.searchParams.get("q")?.trim();
+        const roleFilter = url.searchParams.get("role")?.trim().toUpperCase();
 
-        return NextResponse.json({
-            success: true,
-            data: users,
-        });
-	} catch (error) {
+        const baseWhere: Prisma.UserWhereInput = currentUser.role === "MANAGER"
+            ? { campId: currentUser.campId ?? "", role: { in: ["DIVISION_HEAD", "FIELD_OFFICER"] } }
+            : {};
+
+        const where: Prisma.UserWhereInput = {
+            ...baseWhere,
+            ...(q ? {
+                OR: [
+                    { name: { contains: q, mode: "insensitive" } },
+                    { email: { contains: q, mode: "insensitive" } },
+                ],
+            } : {}),
+            ...(roleFilter && ["SUPER_ADMIN", "MANAGER", "DIVISION_HEAD", "FIELD_OFFICER"].includes(roleFilter)
+                ? { role: roleFilter as "SUPER_ADMIN" | "MANAGER" | "DIVISION_HEAD" | "FIELD_OFFICER" }
+                : {}),
+        };
+
+        const [users, total] = await Promise.all([
+            prisma.user.findMany({
+                where,
+                skip,
+                take: params.limit,
+                orderBy: {
+                    createdAt: "desc",
+                },
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    role: true,
+                    division: true,
+                    campId: true,
+                    camp: {
+                        select: {
+                            id: true,
+                            name: true,
+                        },
+                    },
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            }),
+            prisma.user.count({ where }),
+        ]);
+
+        return paginatedResponse(users, total, params);
+    } catch (error) {
 		if (isAuthError(error)) {
 			return authError(error, "Tidak memiliki akses ke daftar anggota.");
 		}
@@ -58,23 +87,35 @@ export async function POST(request: Request) {
     try {
         const currentUser = await requireRole("SUPER_ADMIN");
 
-        const body = await request.json() as Record<string, unknown>;
+        const body = await readJson(request);
 
-        const name = typeof body.name === "string" ? body.name : "";
-        const email = typeof body.email === "string" ? body.email : "";
+        const nameError = validateText(body.name, "Nama", MAX_NAME_LENGTH);
+        if (nameError) return NextResponse.json({ success: false, message: nameError }, { status: 400 });
+        const name = String(body.name).trim();
+
+        const normalizedEmail = String(body.email ?? "").trim().toLowerCase();
+        if (!normalizedEmail || normalizedEmail.length > MAX_EMAIL_LENGTH || !isValidEmail(normalizedEmail)) {
+            return NextResponse.json({ success: false, message: "Format email tidak valid." }, { status: 400 });
+        }
+
         const password = typeof body.password === "string" ? body.password : "";
         const role = String(body.role ?? "") as "MANAGER" | "DIVISION_HEAD" | "FIELD_OFFICER" | "SUPER_ADMIN";
         const division = (typeof body.division === "string" ? body.division : null) as "LOGISTICS" | "SHELTER" | "DATA_REGISTRATION" | null;
         const campId = typeof body.campId === "string" ? body.campId : null;
 
-        if (!name || !email || !password || !role) {
+        if (!password || !role) {
             return NextResponse.json(
                 {
                     success: false,
-                    message: "Name, email, password, dan role wajib diisi.",
+                    message: "Password dan role wajib diisi.",
                 },
                 { status: 400 },
             );
+        }
+
+        const passwordError = validatePassword(password);
+        if (passwordError) {
+            return NextResponse.json({ success: false, message: passwordError }, { status: 400 });
         }
 
         if (!["MANAGER", "DIVISION_HEAD", "FIELD_OFFICER", "SUPER_ADMIN"].includes(role)) {
@@ -120,22 +161,8 @@ export async function POST(request: Request) {
         }
 
         if (campId) {
-            const camp = await prisma.camp.findUnique({
-                where: { id: campId },
-            });
-
-            if (!camp) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Camp tidak ditemukan.",
-                    },
-                    { status: 404 },
-                );
-            }
+            await assertCampActive(campId);
         }
-
-        const normalizedEmail = String(email).trim().toLowerCase();
 
         const existingUser = await prisma.user.findUnique({
             where: { email: normalizedEmail },
@@ -164,7 +191,7 @@ export async function POST(request: Request) {
             }
 			const created = await tx.user.create({
 				data: {
-					name: String(name).trim(),
+					name,
 					email: normalizedEmail,
 					password: passwordHash,
 					role,
@@ -178,7 +205,6 @@ export async function POST(request: Request) {
 			return created;
 		});
 
-
         await writeAuditLog({ userId: currentUser.id, action: "CREATE", entity: "User", entityId: user.id, details: { name: user.name, role: user.role } });
 
         return NextResponse.json(
@@ -190,6 +216,12 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
+        if (isUniqueConstraintError(error)) {
+            return NextResponse.json({ success: false, message: "Email sudah digunakan." }, { status: 409 });
+        }
+        const knownCampError = campError(error);
+        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
         if (error instanceof Error && error.message === "CAMP_MANAGER_EXISTS") {
             return NextResponse.json({ success: false, message: "Posko tersebut sudah memiliki manager." }, { status: 409 });
         }

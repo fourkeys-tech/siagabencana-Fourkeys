@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
-import { canManageRequest, isPositiveInteger } from "@/lib/distribution";
-import { canManageDivision } from "@/lib/auth/guard";
+import { canManageRequest, hasDistributionAccess, isPositiveInteger } from "@/lib/distribution";
+import { writeAuditLog } from "@/lib/audit";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { MAX_NOTE_LENGTH, validateOptionalText } from "@/lib/validation";
 import { convertRequestedToStock, convertToBase, normalizeUnit, type UnitDefinition } from "@/lib/unit-conversion";
 
-function hasDistributionAccess(user: Parameters<typeof canManageDivision>[0]) {
-    return user.role === "SUPER_ADMIN"
-        || (user.role === "MANAGER" && Boolean(user.campId))
-        || Boolean(user.campId && canManageDivision(user, "LOGISTICS", user.campId));
-}
-
-export async function GET() {
+export async function GET(request: Request) {
     try {
         const user = await requireAuth();
 
@@ -22,27 +18,40 @@ export async function GET() {
             );
         }
 
+        const url = new URL(request.url);
+        const statusParam = url.searchParams.get("status")?.trim().toUpperCase();
+
         const campFilter =
             user.role === "SUPER_ADMIN"
-                ? undefined
+                ? (statusParam ? { status: statusParam as any } : undefined)
                 : {
-                      OR: [
-                          { sourceCampId: user.campId ?? "" },
-                          { destinationCampId: user.campId ?? "" },
+                      AND: [
+                          {
+                              OR: [
+                                  { sourceCampId: user.campId ?? "" },
+                                  { destinationCampId: user.campId ?? "" },
+                              ],
+                          },
+                          ...(statusParam ? [{ status: statusParam as any }] : []),
                       ],
                   };
 
         const distributionFilter =
             user.role === "SUPER_ADMIN"
-                ? undefined
+                ? (statusParam ? { status: statusParam as any } : undefined)
                 : {
-                      OR: [
-                          { sourceCampId: user.campId ?? "" },
-                          { destinationCampId: user.campId ?? "" },
+                      AND: [
+                          {
+                              OR: [
+                                  { sourceCampId: user.campId ?? "" },
+                                  { destinationCampId: user.campId ?? "" },
+                              ],
+                          },
+                          ...(statusParam ? [{ status: statusParam as any }] : []),
                       ],
                   };
 
-        const [requests, distributionRows, proofRows, sourceStocks] = await Promise.all([
+        const [requests, distributionRows, proofRows, sourceStockRows] = await Promise.all([
             prisma.logisticsRequest.findMany({
                 where: campFilter,
                 orderBy: { updatedAt: "desc" },
@@ -93,11 +102,10 @@ export async function GET() {
                     request: { select: { id: true, status: true } },
                 },
             }),
-            prisma.$queryRaw<Array<{ id: string; receiptProofAvailable: boolean; receiptProofMimeType: string | null }>>`
-                SELECT "id", ("receiptProofData" IS NOT NULL) AS "receiptProofAvailable", "receiptProofMimeType"
-                FROM "Distribution"
-                WHERE "receiptProofData" IS NOT NULL
-            `,
+            prisma.distribution.findMany({
+                where: { ...distributionFilter, receiptProofData: { not: null } },
+                select: { id: true, receiptProofMimeType: true },
+            }),
             prisma.logisticsItem.findMany({
                 where: {
                     camp: { status: "ACTIVE" },
@@ -113,7 +121,6 @@ export async function GET() {
                     itemName: true,
                     quantity: true,
                     reservedQuantity: true,
-                    damagedQuantity: true,
                     unit: true,
                     baseUnit: true,
                     unitDimension: true,
@@ -121,8 +128,6 @@ export async function GET() {
                     conversionStatus: true,
                     quantityBase: true,
                     reservedQuantityBase: true,
-                    damagedQuantityBase: true,
-                    status: true,
                 },
             }),
         ]);
@@ -134,10 +139,19 @@ export async function GET() {
             const proof = proofByDistributionId.get(distribution.id);
             return {
                 ...distribution,
-                receiptProofAvailable: proof?.receiptProofAvailable ?? false,
+                receiptProofAvailable: Boolean(proof),
                 receiptProofMimeType: proof?.receiptProofMimeType ?? null,
             };
         });
+
+        // Stok lintas posko diperlukan untuk memilih sumber, tetapi hanya saldo tersedia yang dikirim.
+        const sourceStocks = sourceStockRows
+            .map(({ quantity, reservedQuantity, quantityBase, reservedQuantityBase, ...stock }) => ({
+                ...stock,
+                availableQuantity: Math.max(quantity - reservedQuantity, 0),
+                availableBaseQuantity: Math.max(quantityBase - reservedQuantityBase, 0),
+            }))
+            .filter((stock) => stock.availableBaseQuantity > 0);
 
         return NextResponse.json({
             success: true,
@@ -174,7 +188,11 @@ export async function POST(request: Request) {
             );
         }
 
-        const body = await request.json() as Record<string, unknown>;
+        const body = await readJson(request);
+
+        const notesError = validateOptionalText(body.notes, "Catatan", MAX_NOTE_LENGTH);
+        if (notesError) return NextResponse.json({ success: false, message: notesError }, { status: 400 });
+
         const sourceCampId = String(body.sourceCampId ?? "").trim();
         const requestedDestinationCampId = String(body.destinationCampId ?? "").trim();
         const destinationCampId = user.role === "SUPER_ADMIN" ? requestedDestinationCampId : user.campId;
@@ -297,6 +315,8 @@ export async function POST(request: Request) {
             },
         });
 
+        await writeAuditLog({ userId: user.id, action: "CREATE", entity: "LogisticsRequest", entityId: logisticsRequest.id, details: { itemName: logisticsRequest.itemName, quantity, unit: logisticsRequest.unit, sourceCampId, destinationCampId } });
+
         return NextResponse.json(
             {
                 success: true,
@@ -306,6 +326,7 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
         if (isAuthError(error)) {
             return authError(error);
         }

@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/audit";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { MAX_EMAIL_LENGTH } from "@/lib/validation";
 
 // Rate limiting in-memory sederhana: maks 5 percobaan gagal per 15 menit per email
 type RateLimitEntry = { attempts: number; resetAt: number };
@@ -33,13 +35,20 @@ function resetAttempts(email: string) {
     loginAttempts.delete(email);
 }
 
+// Hash dummy (cost sama dengan hash user) agar waktu respons email tak terdaftar
+// setara dengan password salah — mencegah enumerasi akun lewat timing.
+const DUMMY_PASSWORD_HASH = "$2b$12$EBW.q9mwwU4G6sP7HfIbpue9YtTt5g3Suvo0Y9WemTT1pV4qqV/bS";
+
 export async function POST(request: Request) {
     try {
-        const rawBody: unknown = await request.json();
-        const body = rawBody && typeof rawBody === "object" ? rawBody as Record<string, unknown> : {};
+        const body = await readJson(request);
 
         const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
         const password = typeof body.password === "string" ? body.password : "";
+
+        if (email.length > MAX_EMAIL_LENGTH || password.length > 128) {
+            return NextResponse.json({ success: false, message: "Email atau password salah." }, { status: 401 });
+        }
 
         if (!email || !password) {
             return NextResponse.json(
@@ -68,6 +77,7 @@ export async function POST(request: Request) {
         });
 
         if (!user) {
+            await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
             recordFailedAttempt(email);
             return NextResponse.json(
                 {
@@ -97,6 +107,9 @@ export async function POST(request: Request) {
 
         resetAttempts(email);
         await createSession(user.id);
+
+        // Opportunistic expired sessions cleanup
+        prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } }).catch(() => {});
         await writeAuditLog({ userId: user.id, action: "LOGIN", entity: "Session", details: { email: user.email } });
 
         return NextResponse.json({
@@ -111,6 +124,7 @@ export async function POST(request: Request) {
             },
         });
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
         console.error("LOGIN_ERROR", error);
 
         return NextResponse.json(

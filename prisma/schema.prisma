@@ -177,6 +177,7 @@ model LogisticsItem {
 
   @@index([campId])
   @@index([campId, status])
+  @@index([campId, updatedAt])
 }
 
 model InventoryMovement {
@@ -203,6 +204,7 @@ model InventoryMovement {
   @@index([campId, createdAt])
   @@index([type, createdAt])
   @@index([distributionId])
+  @@index([createdById])
 }
 
 model LogisticsRequest {
@@ -237,8 +239,10 @@ model LogisticsRequest {
 
   @@index([sourceCampId])
   @@index([destinationCampId])
+  @@index([destinationCampId, status])
   @@index([status])
   @@index([createdById])
+  @@index([reviewedById])
 }
 
 model Distribution {
@@ -278,8 +282,9 @@ model Distribution {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([sourceCampId])
-  @@index([destinationCampId])
+  @@index([sourceCampId, status, updatedAt])
+  @@index([destinationCampId, status, updatedAt])
+  @@index([sourceItemId])
   @@index([status])
   @@index([createdById])
 }
@@ -299,6 +304,7 @@ model FacilityReport {
 
   @@index([campId])
   @@index([campId, status])
+  @@index([campId, updatedAt])
 }
 
 model EvacueeRecord {
@@ -320,6 +326,7 @@ model EvacueeRecord {
   updatedAt DateTime @updatedAt
 
   @@index([campId])
+  @@index([campId, arrivedAt])
   @@index([campId, departedAt])
   @@index([campId, hasSpecialNeeds])
 }

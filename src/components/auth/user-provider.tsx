@@ -8,6 +8,7 @@ import {
 	useState,
 } from "react";
 import type { SessionUser } from "@/lib/navigation";
+import { setUnauthorizedHandler } from "@/lib/api-client";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "error" | "expired";
 
@@ -34,8 +35,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 		try {
 			const response = await fetch("/api/auth/me", { cache: "no-store" });
 			if (response.status === 401) {
+				const data = await response.json().catch(() => null);
 				setUser(null);
-				setStatus("expired");
+				setStatus(data?.code === "SESSION_EXPIRED" ? "expired" : "unauthenticated");
 				return;
 			}
 			if (!response.ok) {
@@ -58,10 +60,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	useEffect(() => {
+		setUnauthorizedHandler(() => {
+			setUser(null);
+			setStatus("expired");
+		});
 		const timer = window.setTimeout(() => {
 			void refresh();
 		}, 0);
-		return () => window.clearTimeout(timer);
+		return () => {
+			setUnauthorizedHandler(null);
+			window.clearTimeout(timer);
+		};
 	}, [refresh]);
 
 	return (

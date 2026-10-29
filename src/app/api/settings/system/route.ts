@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireRole } from "@/lib/auth/guard";
+import { authError, isAuthError, requireRole } from "@/lib/auth/guard";
 
 export async function GET() {
 	try {
@@ -17,7 +17,9 @@ export async function GET() {
 				),
 			},
 		});
-	} catch {
-		return NextResponse.json({ success: false, message: "Akses ditolak." }, { status: 403 });
+	} catch (error) {
+		if (isAuthError(error)) return authError(error, "Hanya Super Admin yang dapat melihat informasi sistem.");
+		return NextResponse.json({ success: false, message: "Gagal mengambil informasi sistem." }, { status: 500 });
 	}
 }
+

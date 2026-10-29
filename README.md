@@ -157,15 +157,16 @@ Untuk masuk dashboard, klik **"Masuk ke Dashboard"**.
 
 Silakan gunakan akun bawaan hasil seed:
 
-| Peran | Email | Password |
-| --- | --- | --- |
-| Super Admin | `admin@siagabencana.local` | `password` |
-| Manager Logistik | `manager.logistik.candi@siagabencana.local` | `password` |
-| Manager Shelter | `manager.shelter.candi@siagabencana.local` | `password` |
-| Manager Data | `manager.data.candi@siagabencana.local` | `password` |
-| Field Officer Logistik | `field.logistik.candi@siagabencana.local` | `password` |
-| Field Officer Shelter | `field.shelter.candi@siagabencana.local` | `password` |
-| Field Officer Data | `field.data.candi@siagabencana.local` | `password` |
+| Peran | Nama | Email | Password |
+| --- | --- | --- | --- |
+| Super Admin | Budi Santoso | `admin@siagabencana.local` | `password123` |
+| Manager Posko Candi | Ahmad Fauzi | `ahmad.fauzi@siagabencana.local` | `password123` |
+| Ketua Divisi Logistik Candi | Siti Nurhaliza | `siti.nurhaliza@siagabencana.local` | `password123` |
+| Ketua Divisi Shelter Candi | Hendra Wijaya | `hendra.wijaya@siagabencana.local` | `password123` |
+| Ketua Divisi Data Candi | Dewi Lestari | `dewi.lestari@siagabencana.local` | `password123` |
+| Petugas Lapangan Logistik | Rian Hidayat | `rian.hidayat@siagabencana.local` | `password123` |
+| Petugas Lapangan Shelter | Nurul Hidayati | `nurul.hidayati@siagabencana.local` | `password123` |
+| Petugas Lapangan Data | Indah Permata | `indah.permata@siagabencana.local` | `password123` |
 
 > Sesuaikan email dan password akun Anda masing-masing melalui menu **Pengguna** (hanya Super Admin) setelah login.
 

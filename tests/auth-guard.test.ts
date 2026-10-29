@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { canManageCamp, canManageDivision, getAccessibleCampWhere } from "../src/lib/auth/guard";
-import { canAccessPath, isProtectedPath } from "../src/lib/navigation";
+import { canAssignRole, canManageCamp, canManageDivision, getAccessibleCampWhere } from "../src/lib/auth/guard";
+import { canAccessPath, isProtectedPath, safeReturnTo } from "../src/lib/navigation";
+import { enumLabel } from "../src/lib/labels";
 import type { SessionUser } from "../src/lib/navigation";
 
 describe("auth guard", () => {
@@ -107,6 +108,84 @@ describe("auth guard", () => {
 		it("user without correct role denied nav route", () => {
 			const basicUser: SessionUser = { ...user, role: "FIELD_OFFICER", division: "SHELTER" };
 			expect(canAccessPath("/users", basicUser)).toBe(false);
+		});
+
+		it("division menu hanya untuk divisi yang sesuai", () => {
+			const shelterOfficer: SessionUser = { ...user, division: "SHELTER" };
+			expect(canAccessPath("/logistik", shelterOfficer)).toBe(false);
+			expect(canAccessPath("/distribusi", shelterOfficer)).toBe(false);
+			expect(canAccessPath("/shelter", shelterOfficer)).toBe(true);
+			expect(canAccessPath("/logistik", user)).toBe(true);
+			expect(canAccessPath("/distribusi", user)).toBe(true);
+		});
+
+		it("Manager & Super Admin melihat semua menu divisi", () => {
+			const manager: SessionUser = { ...user, role: "MANAGER", division: null };
+			const admin: SessionUser = { ...user, role: "SUPER_ADMIN", division: null, campId: null };
+			for (const path of ["/logistik", "/shelter", "/pengungsi", "/distribusi", "/kelola-posko"]) {
+				expect(canAccessPath(path, manager)).toBe(true);
+				expect(canAccessPath(path, admin)).toBe(true);
+			}
+		});
+
+		it("Kelola Posko ditolak untuk Field Officer", () => {
+			expect(canAccessPath("/kelola-posko", user)).toBe(false);
+			expect(canAccessPath("/kelola-posko/camp1", user)).toBe(false);
+		});
+	});
+
+	describe("canAssignRole", () => {
+		it("SUPER_ADMIN can assign any role", () => {
+			expect(canAssignRole({ role: "SUPER_ADMIN" }, "SUPER_ADMIN")).toBe(true);
+			expect(canAssignRole({ role: "SUPER_ADMIN" }, "MANAGER")).toBe(true);
+			expect(canAssignRole({ role: "SUPER_ADMIN" }, "DIVISION_HEAD")).toBe(true);
+			expect(canAssignRole({ role: "SUPER_ADMIN" }, "FIELD_OFFICER")).toBe(true);
+		});
+
+		it("MANAGER can only assign DIVISION_HEAD or FIELD_OFFICER", () => {
+			expect(canAssignRole({ role: "MANAGER" }, "SUPER_ADMIN")).toBe(false);
+			expect(canAssignRole({ role: "MANAGER" }, "MANAGER")).toBe(false);
+			expect(canAssignRole({ role: "MANAGER" }, "DIVISION_HEAD")).toBe(true);
+			expect(canAssignRole({ role: "MANAGER" }, "FIELD_OFFICER")).toBe(true);
+		});
+
+		it("other roles cannot assign any role", () => {
+			expect(canAssignRole({ role: "DIVISION_HEAD" }, "FIELD_OFFICER")).toBe(false);
+			expect(canAssignRole({ role: "FIELD_OFFICER" }, "FIELD_OFFICER")).toBe(false);
+		});
+	});
+
+	describe("safeReturnTo", () => {
+		it("allows valid relative paths", () => {
+			expect(safeReturnTo("/dashboard")).toBe("/dashboard");
+			expect(safeReturnTo("/logistik/123")).toBe("/logistik/123");
+		});
+
+		it("rejects open-redirect vectors and protocol-relative paths", () => {
+			expect(safeReturnTo("//evil.com")).toBe("/dashboard");
+			expect(safeReturnTo("/\\evil.com")).toBe("/dashboard");
+			expect(safeReturnTo("https://evil.com")).toBe("/dashboard");
+			expect(safeReturnTo("javascript:alert(1)")).toBe("/dashboard");
+			expect(safeReturnTo(null)).toBe("/dashboard");
+			expect(safeReturnTo(undefined)).toBe("/dashboard");
+			expect(safeReturnTo("")).toBe("/dashboard");
+		});
+
+		it("uses custom fallback when provided", () => {
+			expect(safeReturnTo("//evil.com", "/public")).toBe("/public");
+		});
+	});
+
+	describe("enumLabel", () => {
+		it("translates roles, statuses, and inventory movement types", () => {
+			expect(enumLabel("SUPER_ADMIN")).toBe("Super Admin");
+			expect(enumLabel("MANAGER")).toBe("Manager Posko");
+			expect(enumLabel("ACTIVE")).toBe("Aktif");
+			expect(enumLabel("CLOSED")).toBe("Ditutup");
+			expect(enumLabel("RECEIPT")).toBe("Stok Masuk");
+			expect(enumLabel("DISPOSE")).toBe("Dibuang");
+			expect(enumLabel(null)).toBe("-");
+			expect(enumLabel("UNKNOWN_VAL", "Kustom")).toBe("Kustom");
 		});
 	});
 });

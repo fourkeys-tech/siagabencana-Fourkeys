@@ -56,7 +56,7 @@ export default function UserEditPage() {
 					setFormData({
 						name: userData.data.name,
 						email: userData.data.email,
-						password: "", // Password is not sent back from API
+						password: "",
 						role: userData.data.role,
 						division: userData.data.division ?? "",
 						campId: userData.data.campId ?? "",
@@ -68,7 +68,7 @@ export default function UserEditPage() {
 					setCamps(campsData.data);
 				}
 			})
-			.catch(() => setError("Terjadi kesalahan"))
+			.catch(() => setError("Terjadi kesalahan koneksi"))
 			.finally(() => setLoading(false));
 	}, [id]);
 
@@ -84,7 +84,7 @@ export default function UserEditPage() {
 				body: JSON.stringify({
 					name: formData.name,
 					email: formData.email,
-					...(formData.password && { password: formData.password }), // Only send password if it's changed
+					...(formData.password && { password: formData.password }),
 					role: formData.role,
 					division: formData.role !== "SUPER_ADMIN" ? formData.division : null,
 					campId: formData.role !== "SUPER_ADMIN" ? formData.campId : null,
@@ -100,7 +100,7 @@ export default function UserEditPage() {
 				setError(data.message ?? "Gagal memperbarui pengguna");
 			}
 		} catch {
-			setError("Terjadi kesalahan");
+			setError("Terjadi kesalahan saat menyimpan perubahan.");
 		} finally {
 			setSubmitting(false);
 		}
@@ -109,26 +109,41 @@ export default function UserEditPage() {
 	if (loading) {
 		return (
 			<div className="flex items-center justify-center h-64">
-				<span className="text-gray-500 text-lg">
-					Memuat...
-				</span>
+				<span className="text-gray-500 text-lg">Memuat...</span>
 			</div>
 		);
 	}
 
 	if (error && !user) {
-		return <div className="space-y-4"><Alert type="error">{error}</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
+		return (
+			<div className="space-y-4">
+				<Alert type="error">{error}</Alert>
+				<Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link>
+			</div>
+		);
 	}
 
 	if (!user) {
-		return <div className="space-y-4"><Alert type="info">Pengguna tidak ditemukan.</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
+		return (
+			<div className="space-y-4">
+				<Alert type="info">Pengguna tidak ditemukan.</Alert>
+				<Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link>
+			</div>
+		);
 	}
 
 	const isSuperAdmin = formData.role === "SUPER_ADMIN";
 
 	return (
 		<div className="w-full max-w-3xl min-w-0 space-y-6">
-			<div><Link href={`/users/${user.id}`} className="text-sm font-medium text-blue-600 hover:underline">← Kembali ke Detail Pengguna</Link><h1 className="mt-2 text-2xl font-bold text-gray-900">Edit Pengguna: {user.name}</h1></div>
+			<div>
+				<Link href={`/users/${user.id}`} className="text-sm font-medium text-blue-600 hover:underline">
+					← Kembali ke Detail Pengguna
+				</Link>
+				<h1 className="mt-2 text-2xl font-bold text-gray-900">
+					Edit Pengguna: {user.name}
+				</h1>
+			</div>
 
 			{error && <Alert type="error">{error}</Alert>}
 
@@ -136,33 +151,36 @@ export default function UserEditPage() {
 				<FormField
 					label="Nama"
 					value={formData.name}
-					onChange={(v) =>
-						setFormData({ ...formData, name: v })
-					}
+					onChange={(v) => setFormData({ ...formData, name: v })}
 					required
+					disabled={submitting}
 				/>
 				<FormField
 					label="Email"
 					type="email"
 					value={formData.email}
-					onChange={(v) =>
-						setFormData({ ...formData, email: v })
-					}
+					onChange={(v) => setFormData({ ...formData, email: v })}
 					required
+					disabled={submitting}
 				/>
 				<FormField
 					label="Password (kosongkan jika tidak diubah)"
 					type="password"
 					value={formData.password}
-					onChange={(v) =>
-						setFormData({ ...formData, password: v })
-					}
+					onChange={(v) => setFormData({ ...formData, password: v })}
+					minLength={formData.password ? 8 : undefined}
+					disabled={submitting}
 				/>
 				<FormSelect
 					label="Peran"
 					value={formData.role}
 					onChange={(v) =>
-						setFormData({ ...formData, role: v, division: v === "SUPER_ADMIN" || v === "MANAGER" ? "" : formData.division, campId: v === "SUPER_ADMIN" ? "" : formData.campId, })
+						setFormData({
+							...formData,
+							role: v,
+							division: v === "SUPER_ADMIN" || v === "MANAGER" ? "" : formData.division,
+							campId: v === "SUPER_ADMIN" ? "" : formData.campId,
+						})
 					}
 					options={[
 						{ value: "DIVISION_HEAD", label: "Ketua Divisi" },
@@ -173,14 +191,13 @@ export default function UserEditPage() {
 						]),
 					]}
 					required
+					disabled={submitting}
 				/>
 				{!isSuperAdmin && formData.role !== "MANAGER" && (
 					<FormSelect
 						label="Divisi"
 						value={formData.division}
-						onChange={(v) =>
-							setFormData({ ...formData, division: v })
-						}
+						onChange={(v) => setFormData({ ...formData, division: v })}
 						options={[
 							{ value: "", label: "Pilih Divisi" },
 							{ value: "LOGISTICS", label: "Logistik" },
@@ -188,25 +205,36 @@ export default function UserEditPage() {
 							{ value: "DATA_REGISTRATION", label: "Data Registration" },
 						]}
 						required={!isSuperAdmin}
+						disabled={submitting}
 					/>
 				)}
-				{!isSuperAdmin && (
+				{!isSuperAdmin && managerEditing && (
+					<div className="text-sm">
+						<p className="font-medium text-gray-700">Posko</p>
+						<p className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600">
+							{camps.find((camp) => camp.id === formData.campId)?.name ?? currentUser?.camp?.name ?? "-"}
+						</p>
+						<p className="mt-1 text-xs text-gray-500">
+							Manager hanya dapat mengelola anggota di poskonya sendiri.
+						</p>
+					</div>
+				)}
+				{!isSuperAdmin && !managerEditing && (
 					<FormSelect
 						label="Posko"
 						value={formData.campId}
-						onChange={(v) =>
-							setFormData({ ...formData, campId: v })
-						}
+						onChange={(v) => setFormData({ ...formData, campId: v })}
 						options={[
 							{ value: "", label: "Pilih Posko" },
 							...camps.map((camp) => ({ value: camp.id, label: camp.name })),
 						]}
 						required={!isSuperAdmin}
+						disabled={submitting}
 					/>
 				)}
 				<div className="flex flex-col-reverse gap-2 pt-3 sm:flex-row sm:justify-end sm:gap-3 sm:pt-0">
 					<Link href={`/users/${user.id}`}>
-						<Button type="button" variant="secondary">
+						<Button type="button" variant="secondary" disabled={submitting}>
 							Batal
 						</Button>
 					</Link>

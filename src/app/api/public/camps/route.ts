@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 function availabilityFor(occupancyPercentage: number) {
 	if (occupancyPercentage >= 100) return "FULL" as const;
@@ -33,7 +33,10 @@ export async function GET() {
 			return { ...camp, availableCapacity, occupancyPercentage, availability: availabilityFor(occupancyPercentage), lastUpdatedAt: camp.updatedAt.toISOString() };
 		});
 
-		return NextResponse.json({ success: true, data }, { headers: { "Cache-Control": "no-store" } });
+		return NextResponse.json(
+			{ success: true, data },
+			{ headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120" } },
+		);
 	} catch (error) {
 		console.error("PUBLIC_CAMPS_ERROR", error);
 		return NextResponse.json({ success: false, message: "Gagal mengambil data posko." }, { status: 500 });

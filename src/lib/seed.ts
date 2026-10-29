@@ -14,7 +14,16 @@ if (!connectionString) {
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
-const password = process.env.SEED_PASSWORD || "password";
+// Guard production: mencegah reset user & overwrite data pada environment non-dev/staging.
+const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+if (isProd && process.env.SEED_ALLOW_PROD !== "1") {
+	throw new Error("ABORT: Seeding dinonaktifkan di environment production. Set SEED_ALLOW_PROD=1 untuk override sengaja.");
+}
+
+const password = process.env.SEED_PASSWORD || "password123";
+if (!password || password.length < 8) {
+	throw new Error("SEED_PASSWORD wajib diisi minimal 8 karakter.");
+}
 const seedAsOf = new Date(process.env.SEED_AS_OF || "2026-09-20T12:00:00.000Z");
 const userIdMap = new Map<string, string>();
 
@@ -28,8 +37,9 @@ type CampStatusValue = "ACTIVE" | "CLOSED";
 type ItemStatusValue = "SUFFICIENT" | "LOW" | "CRITICAL" | "SPOILED_OR_DAMAGED";
 type FacilityStatusValue = "GOOD" | "DAMAGED" | "REPAIRING";
 type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" | "RECEIVED" | "CANCELLED";
-	type MovementTypeValue = "RECEIPT" | "DAMAGE" | "LOSS" | "RESTORE" | "DISPOSE" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
-	type CampSeed = {
+type MovementTypeValue = "RECEIPT" | "DAMAGE" | "LOSS" | "RESTORE" | "DISPOSE" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
+
+type CampSeed = {
 	id: string;
 	key: string;
 	name: string;
@@ -39,7 +49,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	maxCapacity: number;
 	status: CampStatusValue;
 };
-	type UserSeed = {
+
+type UserSeed = {
 	id: string;
 	name: string;
 	email: string;
@@ -47,7 +58,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	division: DivisionValue | null;
 	campId: string | null;
 };
-	type LogisticsSeed = {
+
+type LogisticsSeed = {
 	id: string;
 	campId: string;
 	itemName: string;
@@ -64,7 +76,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	inboundQuantity?: number;
 	outboundQuantity?: number;
 };
-	type EvacueeSeed = {
+
+type EvacueeSeed = {
 	id: string;
 	campId: string;
 	name: string;
@@ -74,7 +87,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	arrivedAt: Date;
 	departedAt: Date | null;
 };
-	type FacilitySeed = {
+
+type FacilitySeed = {
 	id: string;
 	campId: string;
 	facilityName: string;
@@ -82,7 +96,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	description: string;
 	createdAt: Date;
 };
-	type RequestSeed = {
+
+type RequestSeed = {
 	id: string;
 	sourceCampId: string;
 	destinationCampId: string;
@@ -96,7 +111,8 @@ type DistributionStatusValue = "PENDING" | "REJECTED" | "RESERVED" | "SHIPPED" |
 	status: DistributionStatusValue;
 	createdAt: Date;
 };
-	type DistributionSeed = {
+
+type DistributionSeed = {
 	id: string;
 	requestId: string;
 	sourceCampId: string;
@@ -170,21 +186,21 @@ const camps: CampSeed[] = [
 	{
 		id: "seed-camp-taman",
 		key: "taman",
-		name: "Posko Evakuasi Lapangan Taman",
-		address: "Lapangan Taman, Sidoarjo",
-		latitude: -7.3645,
-		longitude: 112.6974,
-		maxCapacity: 280,
+		name: "Posko Evakuasi Kantor Kecamatan Taman",
+		address: "Kantor Kecamatan Taman, Sidoarjo",
+		latitude: -7.3524,
+		longitude: 112.6942,
+		maxCapacity: 300,
 		status: "ACTIVE",
 	},
 	{
 		id: "seed-camp-waru",
 		key: "waru",
-		name: "Posko Evakuasi Balai Kecamatan Waru",
-		address: "Balai Kecamatan Waru, Sidoarjo",
-		latitude: -7.3525,
-		longitude: 112.7314,
-		maxCapacity: 180,
+		name: "Posko Evakuasi Balai RW Waru",
+		address: "Balai RW 03 Waru, Sidoarjo",
+		latitude: -7.3541,
+		longitude: 112.7231,
+		maxCapacity: 120,
 		status: "ACTIVE",
 	},
 	{
@@ -201,10 +217,160 @@ const camps: CampSeed[] = [
 
 const dateDaysAgo = (days: number, hours = 0) => new Date(seedAsOf.getTime() - ((days * 24 + hours) * 60 * 60 * 1000));
 
+interface PersonProfile {
+	name: string;
+	email: string;
+}
+
+interface CampStaffProfiles {
+	manager: PersonProfile;
+	divisions: Record<
+		DivisionValue,
+		{
+			head: PersonProfile;
+			officers: [PersonProfile, PersonProfile];
+		}
+	>;
+}
+
+// Profil staf posko dengan nama manusia asli Indonesia (tanpa format nama cabang / posko)
+const staffProfilesByCamp: Record<string, CampStaffProfiles> = {
+	"seed-camp-candi": {
+		manager: { name: "Ahmad Fauzi", email: "ahmad.fauzi@siagabencana.local" },
+		divisions: {
+			LOGISTICS: {
+				head: { name: "Siti Nurhaliza", email: "siti.nurhaliza@siagabencana.local" },
+				officers: [
+					{ name: "Rian Hidayat", email: "rian.hidayat@siagabencana.local" },
+					{ name: "Eko Prasetyo", email: "eko.prasetyo@siagabencana.local" },
+				],
+			},
+			SHELTER: {
+				head: { name: "Hendra Wijaya", email: "hendra.wijaya@siagabencana.local" },
+				officers: [
+					{ name: "Nurul Hidayati", email: "nurul.hidayati@siagabencana.local" },
+					{ name: "Bambang Kurniawan", email: "bambang.kurniawan@siagabencana.local" },
+				],
+			},
+			DATA_REGISTRATION: {
+				head: { name: "Dewi Lestari", email: "dewi.lestari@siagabencana.local" },
+				officers: [
+					{ name: "Indah Permata", email: "indah.permata@siagabencana.local" },
+					{ name: "Rizky Ramadhan", email: "rizky.ramadhan@siagabencana.local" },
+				],
+			},
+		},
+	},
+	"seed-camp-gor-sidoarjo": {
+		manager: { name: "Joko Susilo", email: "joko.susilo@siagabencana.local" },
+		divisions: {
+			LOGISTICS: {
+				head: { name: "Aris Munandar", email: "aris.munandar@siagabencana.local" },
+				officers: [
+					{ name: "Fajar Nugroho", email: "fajar.nugroho@siagabencana.local" },
+					{ name: "Dian Anggraini", email: "dian.anggraini@siagabencana.local" },
+				],
+			},
+			SHELTER: {
+				head: { name: "Tri Wahyuni", email: "tri.wahyuni@siagabencana.local" },
+				officers: [
+					{ name: "Wahyu Setiawan", email: "wahyu.setiawan@siagabencana.local" },
+					{ name: "Sri Rejeki", email: "sri.rejeki@siagabencana.local" },
+				],
+			},
+			DATA_REGISTRATION: {
+				head: { name: "Agus Pratama", email: "agus.pratama@siagabencana.local" },
+				officers: [
+					{ name: "Dimas Saputra", email: "dimas.saputra@siagabencana.local" },
+					{ name: "Ratna Sari", email: "ratna.sari@siagabencana.local" },
+				],
+			},
+		},
+	},
+	"seed-camp-taman": {
+		manager: { name: "Mulyadi", email: "mulyadi@siagabencana.local" },
+		divisions: {
+			LOGISTICS: {
+				head: { name: "Fitri Handayani", email: "fitri.handayani@siagabencana.local" },
+				officers: [
+					{ name: "Surya Pratama", email: "surya.pratama@siagabencana.local" },
+					{ name: "Anisa Rahmawati", email: "anisa.rahmawati@siagabencana.local" },
+				],
+			},
+			SHELTER: {
+				head: { name: "Bagus Wicaksono", email: "bagus.wicaksono@siagabencana.local" },
+				officers: [
+					{ name: "Danang Kusuma", email: "danang.kusuma@siagabencana.local" },
+					{ name: "Putri Utami", email: "putri.utami@siagabencana.local" },
+				],
+			},
+			DATA_REGISTRATION: {
+				head: { name: "Maya Safitri", email: "maya.safitri@siagabencana.local" },
+				officers: [
+					{ name: "Bayu Aji", email: "bayu.aji@siagabencana.local" },
+					{ name: "Nadia Faradila", email: "nadia.faradila@siagabencana.local" },
+				],
+			},
+		},
+	},
+	"seed-camp-waru": {
+		manager: { name: "Iskandar Zulkarnaen", email: "iskandar.zulkarnaen@siagabencana.local" },
+		divisions: {
+			LOGISTICS: {
+				head: { name: "Lukman Hakim", email: "lukman.hakim@siagabencana.local" },
+				officers: [
+					{ name: "Ade Kurnia", email: "ade.kurnia@siagabencana.local" },
+					{ name: "Mega Puspita", email: "mega.puspita@siagabencana.local" },
+				],
+			},
+			SHELTER: {
+				head: { name: "Rina Marlina", email: "rina.marlina@siagabencana.local" },
+				officers: [
+					{ name: "Taufik Rahman", email: "taufik.rahman@siagabencana.local" },
+					{ name: "Yulia Citra", email: "yulia.citra@siagabencana.local" },
+				],
+			},
+			DATA_REGISTRATION: {
+				head: { name: "Dodi Firmansyah", email: "dodi.firmansyah@siagabencana.local" },
+				officers: [
+					{ name: "Gita Savitri", email: "gita.savitri@siagabencana.local" },
+					{ name: "Hadi Purnomo", email: "hadi.purnomo@siagabencana.local" },
+				],
+			},
+		},
+	},
+	"seed-camp-gedangan": {
+		manager: { name: "Sugeng Riyadi", email: "sugeng.riyadi@siagabencana.local" },
+		divisions: {
+			LOGISTICS: {
+				head: { name: "Wawan Hermawan", email: "wawan.hermawan@siagabencana.local" },
+				officers: [
+					{ name: "Irfan Maulana", email: "irfan.maulana@siagabencana.local" },
+					{ name: "Lilis Suryani", email: "lilis.suryani@siagabencana.local" },
+				],
+			},
+			SHELTER: {
+				head: { name: "Endang Sulastri", email: "endang.sulastri@siagabencana.local" },
+				officers: [
+					{ name: "Yusuf Efendi", email: "yusuf.efendi@siagabencana.local" },
+					{ name: "Titin Sumarni", email: "titin.sumarni@siagabencana.local" },
+				],
+			},
+			DATA_REGISTRATION: {
+				head: { name: "Kurnia Sandi", email: "kurnia.sandi@siagabencana.local" },
+				officers: [
+					{ name: "Agil Saputro", email: "agil.saputro@siagabencana.local" },
+					{ name: "Novi Indriani", email: "novi.indriani@siagabencana.local" },
+				],
+			},
+		},
+	},
+};
+
 function createUsers() {
 	const admin: UserSeed = {
 		id: "seed-user-admin",
-		name: "Super Administrator",
+		name: "Budi Santoso",
 		email: "admin@siagabencana.local",
 		role: "SUPER_ADMIN",
 		division: null,
@@ -216,10 +382,13 @@ function createUsers() {
 	const officers = new Map<string, UserSeed>();
 
 	for (const camp of camps) {
+		const profile = staffProfilesByCamp[camp.id];
+		if (!profile) continue;
+
 		const manager: UserSeed = {
 			id: `seed-user-manager-${camp.key}`,
-			name: `Manager ${camp.name.replace("Posko Evakuasi ", "")}`,
-			email: `manager.${camp.key}@siagabencana.local`,
+			name: profile.manager.name,
+			email: profile.manager.email,
 			role: "MANAGER",
 			division: null,
 			campId: camp.id,
@@ -228,11 +397,13 @@ function createUsers() {
 		managers.set(camp.id, manager);
 
 		for (const division of divisions) {
+			const divProfile = profile.divisions[division];
 			const divisionKey = division.toLowerCase();
+
 			const head: UserSeed = {
 				id: `seed-user-head-${camp.key}-${divisionKey}`,
-				name: `Head ${divisionKey} ${camp.key}`,
-				email: `head.${divisionKey}.${camp.key}@siagabencana.local`,
+				name: divProfile.head.name,
+				email: divProfile.head.email,
 				role: "DIVISION_HEAD",
 				division,
 				campId: camp.id,
@@ -240,18 +411,19 @@ function createUsers() {
 			users.push(head);
 			heads.set(`${camp.id}:${division}`, head);
 
-			for (const sequence of [1, 2]) {
+			divProfile.officers.forEach((offProfile, idx) => {
+				const sequence = idx + 1;
 				const officer: UserSeed = {
 					id: `seed-user-field-${camp.key}-${divisionKey}-${sequence}`,
-					name: `Field Officer ${divisionKey} ${camp.key} ${String(sequence).padStart(2, "0")}`,
-					email: `field.${divisionKey}.${camp.key}.${String(sequence).padStart(2, "0")}@siagabencana.local`,
+					name: offProfile.name,
+					email: offProfile.email,
 					role: "FIELD_OFFICER",
 					division,
 					campId: camp.id,
 				};
 				users.push(officer);
 				officers.set(`${camp.id}:${division}:${sequence}`, officer);
-			}
+			});
 		}
 	}
 
@@ -307,49 +479,80 @@ const facilities: FacilitySeed[] = camps.flatMap((camp) => [
 const userData = createUsers();
 const managerFor = (campId: string) => userData.managers.get(campId) as UserSeed;
 const headFor = (campId: string, division: DivisionValue) => userData.heads.get(`${campId}:${division}`) as UserSeed;
+
+// Inventaris logistik realistis standar penanggulangan darurat bencana (pangan, hunian, sanitasi, medis, peralatan)
 const logisticsItems: LogisticsSeed[] = [
-	{ id: "seed-item-candi-rice", campId: "seed-camp-candi", itemName: "Beras", quantity: 520, reservedQuantity: 80, damagedQuantity: 0, minimumQuantity: 120, unit: "kg", status: "SUFFICIENT", notes: "Stok utama untuk dapur umum.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
-	{ id: "seed-item-candi-water", campId: "seed-camp-candi", itemName: "Air Mineral", quantity: 180, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 100, unit: "dus", status: "SUFFICIENT", notes: "Distribusi harian dicatat oleh tim logistik.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
-	{ id: "seed-item-candi-medicine", campId: "seed-camp-candi", itemName: "Obat-obatan", quantity: 32, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "box", status: "LOW", notes: "Prioritas pengadaan untuk pos kesehatan.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
-	{ id: "seed-item-candi-blanket", campId: "seed-camp-candi", itemName: "Selimut", quantity: 5, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "pcs", status: "CRITICAL", notes: "Stok hampir habis.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
-	{ id: "seed-item-candi-hygiene", campId: "seed-camp-candi", itemName: "Hygiene Kit", quantity: 42, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 15, unit: "paket", status: "SUFFICIENT", notes: "Sebagian dikirim ke Posko Waru.", createdById: headFor("seed-camp-candi", "LOGISTICS").id, outboundQuantity: 30 },
-	{ id: "seed-item-candi-tarpaulin", campId: "seed-camp-candi", itemName: "Terpal", quantity: 24, reservedQuantity: 0, damagedQuantity: 6, minimumQuantity: 10, unit: "pcs", status: "SPOILED_OR_DAMAGED", notes: "Enam unit rusak karena penyimpanan lembap.", createdById: headFor("seed-camp-candi", "LOGISTICS").id, damageQuantity: 6 },
-	{ id: "seed-item-gor-rice", campId: "seed-camp-gor-sidoarjo", itemName: "Beras", quantity: 260, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 100, unit: "kg", status: "SUFFICIENT", notes: "Stok aman untuk dapur umum besar.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
-	{ id: "seed-item-gor-water", campId: "seed-camp-gor-sidoarjo", itemName: "Air Mineral", quantity: 50, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 80, unit: "dus", status: "LOW", notes: "Sebagian dikirim ke Posko Taman.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, outboundQuantity: 40 },
-	{ id: "seed-item-gor-hygiene", campId: "seed-camp-gor-sidoarjo", itemName: "Hygiene Kit", quantity: 0, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "paket", status: "CRITICAL", notes: "Pengadaan baru sedang menunggu.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, lossQuantity: 15 },
-	{ id: "seed-item-gor-ready-meal", campId: "seed-camp-gor-sidoarjo", itemName: "Makanan Siap Saji", quantity: 180, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 70, unit: "dus", status: "SUFFICIENT", notes: "Untuk kebutuhan makan tiga hari.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
-	{ id: "seed-item-gor-generator", campId: "seed-camp-gor-sidoarjo", itemName: "Generator", quantity: 8, reservedQuantity: 0, damagedQuantity: 2, minimumQuantity: 2, unit: "unit", status: "SPOILED_OR_DAMAGED", notes: "Dua unit perlu servis berat.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, damageQuantity: 2 },
-	{ id: "seed-item-taman-rice", campId: "seed-camp-taman", itemName: "Beras", quantity: 45, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 80, unit: "kg", status: "LOW", notes: "Pernah memiliki reservasi yang dibatalkan.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
-	{ id: "seed-item-taman-water", campId: "seed-camp-taman", itemName: "Air Mineral", quantity: 40, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "dus", status: "SUFFICIENT", notes: "Tambahan stok dari Posko GOR.", createdById: headFor("seed-camp-taman", "LOGISTICS").id, inboundQuantity: 40 },
-	{ id: "seed-item-taman-ready-meal", campId: "seed-camp-taman", itemName: "Makanan Siap Saji", quantity: 160, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 50, unit: "dus", status: "SUFFICIENT", notes: "Stok untuk kondisi darurat.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
-	{ id: "seed-item-taman-blanket", campId: "seed-camp-taman", itemName: "Selimut", quantity: 12, reservedQuantity: 0, damagedQuantity: 2, minimumQuantity: 10, unit: "pcs", status: "SPOILED_OR_DAMAGED", notes: "Dua unit rusak karena terkena air.", createdById: headFor("seed-camp-taman", "LOGISTICS").id, damageQuantity: 2 },
-	{ id: "seed-item-taman-hygiene", campId: "seed-camp-taman", itemName: "Hygiene Kit", quantity: 18, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "paket", status: "LOW", notes: "Perlu penambahan sebelum akhir pekan.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
-	{ id: "seed-item-waru-rice", campId: "seed-camp-waru", itemName: "Beras", quantity: 100, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "kg", status: "SUFFICIENT", notes: null, createdById: headFor("seed-camp-waru", "LOGISTICS").id },
-	{ id: "seed-item-waru-water", campId: "seed-camp-waru", itemName: "Air Mineral", quantity: 35, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "dus", status: "LOW", notes: "Konsumsi meningkat karena cuaca panas.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
-	{ id: "seed-item-waru-hygiene", campId: "seed-camp-waru", itemName: "Hygiene Kit", quantity: 42, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "paket", status: "SUFFICIENT", notes: "Tambahan stok diterima dari Posko Candi.", createdById: headFor("seed-camp-waru", "LOGISTICS").id, inboundQuantity: 30 },
-	{ id: "seed-item-waru-medicine", campId: "seed-camp-waru", itemName: "Obat-obatan", quantity: 22, reservedQuantity: 0, damagedQuantity: 2, minimumQuantity: 10, unit: "box", status: "SPOILED_OR_DAMAGED", notes: "Dua box rusak dan dipisahkan.", createdById: headFor("seed-camp-waru", "LOGISTICS").id, damageQuantity: 2 },
-	{ id: "seed-item-waru-lamp", campId: "seed-camp-waru", itemName: "Lampu Tenaga Surya", quantity: 14, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 15, unit: "unit", status: "LOW", notes: "Sebagian area masih membutuhkan penerangan.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
-	{ id: "seed-item-gedangan-rice", campId: "seed-camp-gedangan", itemName: "Beras", quantity: 150, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "kg", status: "SUFFICIENT", notes: "Stok tersisa dari operasional sebelum posko ditutup.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
-	{ id: "seed-item-gedangan-water", campId: "seed-camp-gedangan", itemName: "Air Mineral", quantity: 50, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "dus", status: "SUFFICIENT", notes: "Tidak digunakan setelah posko ditutup.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
-	{ id: "seed-item-gedangan-blanket", campId: "seed-camp-gedangan", itemName: "Selimut", quantity: 25, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 10, unit: "pcs", status: "SUFFICIENT", notes: "Akan dialihkan bila posko dibuka kembali.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
-	{ id: "seed-item-gedangan-hygiene", campId: "seed-camp-gedangan", itemName: "Hygiene Kit", quantity: 30, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 10, unit: "paket", status: "SUFFICIENT", notes: null, createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
-	{ id: "seed-item-gedangan-medicine", campId: "seed-camp-gedangan", itemName: "Obat-obatan", quantity: 10, reservedQuantity: 0, damagedQuantity: 1, minimumQuantity: 5, unit: "box", status: "SPOILED_OR_DAMAGED", notes: "Satu box melewati masa simpan.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id, damageQuantity: 1 },
+	// Posko Balai Desa Candi
+	{ id: "seed-item-candi-rice", campId: "seed-camp-candi", itemName: "Beras Premium", quantity: 850, reservedQuantity: 80, damagedQuantity: 0, minimumQuantity: 200, unit: "kg", status: "SUFFICIENT", notes: "Stok beras untuk operasional dapur umum utama.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-water", campId: "seed-camp-candi", itemName: "Air Mineral 600ml", quantity: 240, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 100, unit: "dus", status: "SUFFICIENT", notes: "Pasokan air minum kemasan harian untuk pengungsi.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-noodle", campId: "seed-camp-candi", itemName: "Mie Instan Dus", quantity: 120, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 50, unit: "dus", status: "SUFFICIENT", notes: "Stok cadangan makanan darurat dapur umum.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-baby-food", campId: "seed-camp-candi", itemName: "Biskuit & Makanan Bayi", quantity: 45, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "dus", status: "SUFFICIENT", notes: "Nutrisi dan bubur instan untuk balita.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-hygiene", campId: "seed-camp-candi", itemName: "Paket Hygiene Kit Keluarga", quantity: 65, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "paket", status: "SUFFICIENT", notes: "Paket sabun, pasta gigi, handuk, dan detergen. Sebagian dikirim ke Posko Waru.", createdById: headFor("seed-camp-candi", "LOGISTICS").id, outboundQuantity: 30 },
+	{ id: "seed-item-candi-medicine", campId: "seed-camp-candi", itemName: "Paket P3K & Obat Darurat", quantity: 18, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 35, unit: "box", status: "LOW", notes: "Perlu restock paracetamol, perban, dan antiseptik dari Dinas Kesehatan.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-blanket", campId: "seed-camp-candi", itemName: "Selimut Hangat Dewasa", quantity: 8, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "pcs", status: "CRITICAL", notes: "Stok menipis drastis karena lonjakan pengungsi baru di tenda keluarga.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-tarpaulin", campId: "seed-camp-candi", itemName: "Terpal Plastik HDPE 4x6m", quantity: 32, reservedQuantity: 0, damagedQuantity: 6, minimumQuantity: 15, unit: "pcs", status: "SPOILED_OR_DAMAGED", notes: "Enam lembar terpal robek saat terpaan angin kencang di area tenda cadangan.", createdById: headFor("seed-camp-candi", "LOGISTICS").id, damageQuantity: 6 },
+	{ id: "seed-item-candi-tent", campId: "seed-camp-candi", itemName: "Tenda Pengungsi Keluarga 4x4m", quantity: 12, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 5, unit: "unit", status: "SUFFICIENT", notes: "Tenda pleton modular siap didirikan bila ada arus susulan.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-diapers", campId: "seed-camp-candi", itemName: "Popok Bayi (Pampers Balita)", quantity: 15, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 25, unit: "box", status: "LOW", notes: "Kebutuhan meningkat untuk balita di blok pengungsian barat.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-pads", campId: "seed-camp-candi", itemName: "Pembalut Wanita", quantity: 50, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "pcs", status: "SUFFICIENT", notes: "Distribusi berkala bersama pembagian perlengkapan sanitasi.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+	{ id: "seed-item-candi-generator", campId: "seed-camp-candi", itemName: "Genset Listrik Portable 3500W", quantity: 4, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 2, unit: "unit", status: "SUFFICIENT", notes: "Dua unit menyala untuk tenda medis, dua unit stand-by.", createdById: headFor("seed-camp-candi", "LOGISTICS").id },
+
+	// Posko GOR Sidoarjo
+	{ id: "seed-item-gor-rice", campId: "seed-camp-gor-sidoarjo", itemName: "Beras Premium", quantity: 650, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 250, unit: "kg", status: "SUFFICIENT", notes: "Stok utama dapur umum besar aula GOR Sidoarjo.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-water", campId: "seed-camp-gor-sidoarjo", itemName: "Air Mineral 600ml", quantity: 45, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 120, unit: "dus", status: "LOW", notes: "Stok menipis setelah penyaluran bantuan ke Posko Taman.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, outboundQuantity: 40 },
+	{ id: "seed-item-gor-ready-meal", campId: "seed-camp-gor-sidoarjo", itemName: "Makanan Siap Saji (Ransum Darurat)", quantity: 280, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 100, unit: "dus", status: "SUFFICIENT", notes: "Ransum darurat siap santap untuk logistik cepat.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-noodle", campId: "seed-camp-gor-sidoarjo", itemName: "Mie Instan Dus", quantity: 210, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 80, unit: "dus", status: "SUFFICIENT", notes: "Cadangan pangan darurat dapur umum.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-hygiene", campId: "seed-camp-gor-sidoarjo", itemName: "Paket Hygiene Kit Keluarga", quantity: 0, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "paket", status: "CRITICAL", notes: "Stok habis total, menunggu pengiriman bantuan logistik BPBD.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, lossQuantity: 15 },
+	{ id: "seed-item-gor-generator", campId: "seed-camp-gor-sidoarjo", itemName: "Genset Listrik Portable 3500W", quantity: 6, reservedQuantity: 0, damagedQuantity: 2, minimumQuantity: 3, unit: "unit", status: "SPOILED_OR_DAMAGED", notes: "Dua unit mengalami kerusakan dinamo dan sedang diperbaiki teknisi.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, damageQuantity: 2 },
+	{ id: "seed-item-gor-blanket", campId: "seed-camp-gor-sidoarjo", itemName: "Selimut Hangat Dewasa", quantity: 180, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 80, unit: "pcs", status: "SUFFICIENT", notes: "Tersalurkan ke tribun dan aula indoor.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-mattress", campId: "seed-camp-gor-sidoarjo", itemName: "Matras Lipat Spons", quantity: 220, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 100, unit: "pcs", status: "SUFFICIENT", notes: "Alas tidur pengungsi di lantai aula olahraga.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-medicine", campId: "seed-camp-gor-sidoarjo", itemName: "Paket P3K & Obat Darurat", quantity: 12, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "box", status: "LOW", notes: "Perlu tambahan obat flu, salep kulit, dan obat lambung.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-mask", campId: "seed-camp-gor-sidoarjo", itemName: "Masker Medis 3-Ply", quantity: 80, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "box", status: "SUFFICIENT", notes: "Pencegahan ISPA di area pengungsian tertutup.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+	{ id: "seed-item-gor-diapers", campId: "seed-camp-gor-sidoarjo", itemName: "Popok Bayi (Pampers Balita)", quantity: 35, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 25, unit: "box", status: "SUFFICIENT", notes: "Stok balita memadai untuk 5 hari ke depan.", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id },
+
+	// Posko Kantor Kecamatan Taman
+	{ id: "seed-item-taman-rice", campId: "seed-camp-taman", itemName: "Beras Premium", quantity: 95, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 120, unit: "kg", status: "LOW", notes: "Permintaan transfer 80 kg dari Posko Candi sedang diproses.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-water", campId: "seed-camp-taman", itemName: "Air Mineral 600ml", quantity: 58, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "dus", status: "SUFFICIENT", notes: "Tambahan pasokan telah diterima dari Posko GOR Sidoarjo.", createdById: headFor("seed-camp-taman", "LOGISTICS").id, inboundQuantity: 40 },
+	{ id: "seed-item-taman-ready-meal", campId: "seed-camp-taman", itemName: "Makanan Siap Saji (Ransum Darurat)", quantity: 190, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 60, unit: "dus", status: "SUFFICIENT", notes: "Stok ransum cukup untuk 4 hari ke depan.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-noodle", campId: "seed-camp-taman", itemName: "Mie Instan Dus", quantity: 85, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "dus", status: "SUFFICIENT", notes: "Kebutuhan harian dapur umum Taman.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-blanket", campId: "seed-camp-taman", itemName: "Selimut Hangat Dewasa", quantity: 22, reservedQuantity: 0, damagedQuantity: 4, minimumQuantity: 20, unit: "pcs", status: "SPOILED_OR_DAMAGED", notes: "Empat lembar selimut basah terkena rembesan air saat hujan lebat.", createdById: headFor("seed-camp-taman", "LOGISTICS").id, damageQuantity: 4 },
+	{ id: "seed-item-taman-hygiene", campId: "seed-camp-taman", itemName: "Paket Hygiene Kit Keluarga", quantity: 14, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 25, unit: "paket", status: "LOW", notes: "Jumlah paket tersisa sedikit, butuh penambahan dari gudang sentral.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-baby-food", campId: "seed-camp-taman", itemName: "Biskuit & Makanan Bayi", quantity: 8, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 15, unit: "dus", status: "LOW", notes: "Stok makanan bayi menipis karena peningkatan balita.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-tarpaulin", campId: "seed-camp-taman", itemName: "Terpal Plastik HDPE 4x6m", quantity: 18, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 10, unit: "pcs", status: "SUFFICIENT", notes: "Untuk kanopi darurat posko depan.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+	{ id: "seed-item-taman-medicine", campId: "seed-camp-taman", itemName: "Paket P3K & Obat Darurat", quantity: 6, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "box", status: "CRITICAL", notes: "Stok obat-obatan esensial hampir kosong.", createdById: headFor("seed-camp-taman", "LOGISTICS").id },
+
+	// Posko Balai RW Waru
+	{ id: "seed-item-waru-rice", campId: "seed-camp-waru", itemName: "Beras Premium", quantity: 140, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 50, unit: "kg", status: "SUFFICIENT", notes: "Stok mencukupi untuk kebutuhan warga pengungsi RW Waru.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+	{ id: "seed-item-waru-water", campId: "seed-camp-waru", itemName: "Air Mineral 600ml", quantity: 28, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 45, unit: "dus", status: "LOW", notes: "Konsumsi tinggi akibat suhu udara panas.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+	{ id: "seed-item-waru-noodle", campId: "seed-camp-waru", itemName: "Mie Instan Dus", quantity: 65, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "dus", status: "SUFFICIENT", notes: "Stok dapur umum balai RW.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+	{ id: "seed-item-waru-hygiene", campId: "seed-camp-waru", itemName: "Paket Hygiene Kit Keluarga", quantity: 48, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 25, unit: "paket", status: "SUFFICIENT", notes: "Bantuan telah diterima dari Posko Candi dan siap dibagikan.", createdById: headFor("seed-camp-waru", "LOGISTICS").id, inboundQuantity: 30 },
+	{ id: "seed-item-waru-medicine", campId: "seed-camp-waru", itemName: "Paket P3K & Obat Darurat", quantity: 26, reservedQuantity: 0, damagedQuantity: 2, minimumQuantity: 15, unit: "box", status: "SPOILED_OR_DAMAGED", notes: "Dua box obat rusak kemasannya dan dipisahkan di ruang karantina.", createdById: headFor("seed-camp-waru", "LOGISTICS").id, damageQuantity: 2 },
+	{ id: "seed-item-waru-lamp", campId: "seed-camp-waru", itemName: "Lampu Darurat Solar LED", quantity: 16, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "unit", status: "LOW", notes: "Penerangan lorong tenda masih kurang beberapa titik.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+	{ id: "seed-item-waru-blanket", campId: "seed-camp-waru", itemName: "Selimut Hangat Dewasa", quantity: 55, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 30, unit: "pcs", status: "SUFFICIENT", notes: "Cukup untuk seluruh keluarga di posko.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+	{ id: "seed-item-waru-diapers", campId: "seed-camp-waru", itemName: "Popok Bayi (Pampers Balita)", quantity: 22, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 15, unit: "box", status: "SUFFICIENT", notes: "Stok popok balita aman.", createdById: headFor("seed-camp-waru", "LOGISTICS").id },
+
+	// Posko Gedangan Lama (CLOSED)
+	{ id: "seed-item-gedangan-rice", campId: "seed-camp-gedangan", itemName: "Beras Premium", quantity: 150, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 40, unit: "kg", status: "SUFFICIENT", notes: "Sisa persediaan logistik sebelum penutupan posko.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
+	{ id: "seed-item-gedangan-water", campId: "seed-camp-gedangan", itemName: "Air Mineral 600ml", quantity: 50, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 20, unit: "dus", status: "SUFFICIENT", notes: "Stok tersegel dalam gudang tertutup.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
+	{ id: "seed-item-gedangan-blanket", campId: "seed-camp-gedangan", itemName: "Selimut Hangat Dewasa", quantity: 25, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 10, unit: "pcs", status: "SUFFICIENT", notes: "Akan dialihkan ke Posko Candi atau GOR.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
+	{ id: "seed-item-gedangan-hygiene", campId: "seed-camp-gedangan", itemName: "Paket Hygiene Kit Keluarga", quantity: 30, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 10, unit: "paket", status: "SUFFICIENT", notes: "Disimpan dalam kontainer plastik tertutup rapat.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
+	{ id: "seed-item-gedangan-medicine", campId: "seed-camp-gedangan", itemName: "Paket P3K & Obat Darurat", quantity: 10, reservedQuantity: 0, damagedQuantity: 1, minimumQuantity: 5, unit: "box", status: "SPOILED_OR_DAMAGED", notes: "Satu box melewati batas masa simpan obat salep.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id, damageQuantity: 1 },
+	{ id: "seed-item-gedangan-tarpaulin", campId: "seed-camp-gedangan", itemName: "Terpal Plastik HDPE 4x6m", quantity: 15, reservedQuantity: 0, damagedQuantity: 0, minimumQuantity: 5, unit: "pcs", status: "SUFFICIENT", notes: "Terpal cadangan disimpan rapi di gudang.", createdById: headFor("seed-camp-gedangan", "LOGISTICS").id },
 ];
 
 const requests: RequestSeed[] = [
-	{ id: "seed-request-pending-candi-gor-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-gor-sidoarjo", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, reviewedById: null, itemName: "Beras", quantity: 50, unit: "kg", notes: "Permintaan tambahan untuk dapur umum akhir pekan.", rejectionReason: null, status: "PENDING", createdAt: dateDaysAgo(1, 4) },
-	{ id: "seed-request-rejected-taman-waru-water", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-waru", createdById: headFor("seed-camp-waru", "LOGISTICS").id, reviewedById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Air Mineral", quantity: 30, unit: "dus", notes: "Permintaan untuk penambahan buffer air.", rejectionReason: "Stok sumber diprioritaskan untuk kebutuhan posko yang hampir penuh.", status: "REJECTED", createdAt: dateDaysAgo(4), },
-	{ id: "seed-request-reserved-candi-taman-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-taman", createdById: headFor("seed-camp-taman", "LOGISTICS").id, reviewedById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Beras", quantity: 80, unit: "kg", notes: "Pengiriman beras untuk menjaga stok minimum Posko Taman.", rejectionReason: null, status: "RESERVED", createdAt: dateDaysAgo(5), },
-	{ id: "seed-request-shipped-gor-taman-water", sourceCampId: "seed-camp-gor-sidoarjo", destinationCampId: "seed-camp-taman", createdById: headFor("seed-camp-taman", "LOGISTICS").id, reviewedById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, itemName: "Air Mineral", quantity: 40, unit: "dus", notes: "Pengiriman air untuk posko dengan okupansi tinggi.", rejectionReason: null, status: "SHIPPED", createdAt: dateDaysAgo(7), },
-	{ id: "seed-request-received-candi-waru-hygiene", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-waru", createdById: headFor("seed-camp-waru", "LOGISTICS").id, reviewedById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Hygiene Kit", quantity: 30, unit: "paket", notes: "Bantuan hygiene kit untuk keluarga dengan anak kecil.", rejectionReason: null, status: "RECEIVED", createdAt: dateDaysAgo(11), },
-	{ id: "seed-request-cancelled-taman-candi-rice", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-candi", createdById: headFor("seed-camp-candi", "LOGISTICS").id, reviewedById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Beras", quantity: 20, unit: "kg", notes: "Permintaan dibatalkan setelah pasokan lokal tiba.", rejectionReason: null, status: "CANCELLED", createdAt: dateDaysAgo(9), },
+	{ id: "seed-request-pending-candi-gor-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-gor-sidoarjo", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, reviewedById: null, itemName: "Beras Premium", quantity: 50, unit: "kg", notes: "Permintaan tambahan untuk dapur umum akhir pekan.", rejectionReason: null, status: "PENDING", createdAt: dateDaysAgo(1, 4) },
+	{ id: "seed-request-rejected-taman-waru-water", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-waru", createdById: headFor("seed-camp-waru", "LOGISTICS").id, reviewedById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Air Mineral 600ml", quantity: 30, unit: "dus", notes: "Permintaan untuk penambahan buffer air.", rejectionReason: "Stok sumber diprioritaskan untuk kebutuhan posko yang hampir penuh.", status: "REJECTED", createdAt: dateDaysAgo(4) },
+	{ id: "seed-request-reserved-candi-taman-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-taman", createdById: headFor("seed-camp-taman", "LOGISTICS").id, reviewedById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Beras Premium", quantity: 80, unit: "kg", notes: "Pengiriman beras untuk menjaga stok minimum Posko Taman.", rejectionReason: null, status: "RESERVED", createdAt: dateDaysAgo(5) },
+	{ id: "seed-request-shipped-gor-taman-water", sourceCampId: "seed-camp-gor-sidoarjo", destinationCampId: "seed-camp-taman", createdById: headFor("seed-camp-taman", "LOGISTICS").id, reviewedById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, itemName: "Air Mineral 600ml", quantity: 40, unit: "dus", notes: "Pengiriman air untuk posko dengan okupansi tinggi.", rejectionReason: null, status: "SHIPPED", createdAt: dateDaysAgo(7) },
+	{ id: "seed-request-received-candi-waru-hygiene", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-waru", createdById: headFor("seed-camp-waru", "LOGISTICS").id, reviewedById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Paket Hygiene Kit Keluarga", quantity: 30, unit: "paket", notes: "Bantuan hygiene kit untuk keluarga dengan anak kecil.", rejectionReason: null, status: "RECEIVED", createdAt: dateDaysAgo(11) },
+	{ id: "seed-request-cancelled-taman-candi-rice", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-candi", createdById: headFor("seed-camp-candi", "LOGISTICS").id, reviewedById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Beras Premium", quantity: 20, unit: "kg", notes: "Permintaan dibatalkan setelah pasokan lokal tiba.", rejectionReason: null, status: "CANCELLED", createdAt: dateDaysAgo(9) },
 ];
 
 const distributions: DistributionSeed[] = [
-	{ id: "seed-distribution-reserved-candi-taman-rice", requestId: "seed-request-reserved-candi-taman-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-taman", sourceItemId: "seed-item-candi-rice", createdById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Beras", quantity: 80, unit: "kg", notes: "Pengiriman beras untuk menjaga stok minimum Posko Taman.", status: "RESERVED", createdAt: dateDaysAgo(5, 2), shippedAt: null, receivedAt: null },
-	{ id: "seed-distribution-shipped-gor-taman-water", requestId: "seed-request-shipped-gor-taman-water", sourceCampId: "seed-camp-gor-sidoarjo", destinationCampId: "seed-camp-taman", sourceItemId: "seed-item-gor-water", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, itemName: "Air Mineral", quantity: 40, unit: "dus", notes: "Pengiriman air untuk posko dengan okupansi tinggi.", status: "SHIPPED", createdAt: dateDaysAgo(7, 2), shippedAt: dateDaysAgo(2), receivedAt: null },
-	{ id: "seed-distribution-received-candi-waru-hygiene", requestId: "seed-request-received-candi-waru-hygiene", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-waru", sourceItemId: "seed-item-candi-hygiene", createdById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Hygiene Kit", quantity: 30, unit: "paket", notes: "Bantuan hygiene kit untuk keluarga dengan anak kecil.", status: "RECEIVED", createdAt: dateDaysAgo(11, 2), shippedAt: dateDaysAgo(6), receivedAt: dateDaysAgo(4), },
-	{ id: "seed-distribution-cancelled-taman-candi-rice", requestId: "seed-request-cancelled-taman-candi-rice", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-candi", sourceItemId: "seed-item-taman-rice", createdById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Beras", quantity: 20, unit: "kg", notes: "Permintaan dibatalkan setelah pasokan lokal tiba.", status: "CANCELLED", createdAt: dateDaysAgo(9, 2), shippedAt: null, receivedAt: null },
+	{ id: "seed-distribution-reserved-candi-taman-rice", requestId: "seed-request-reserved-candi-taman-rice", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-taman", sourceItemId: "seed-item-candi-rice", createdById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Beras Premium", quantity: 80, unit: "kg", notes: "Pengiriman beras untuk menjaga stok minimum Posko Taman.", status: "RESERVED", createdAt: dateDaysAgo(5, 2), shippedAt: null, receivedAt: null },
+	{ id: "seed-distribution-shipped-gor-taman-water", requestId: "seed-request-shipped-gor-taman-water", sourceCampId: "seed-camp-gor-sidoarjo", destinationCampId: "seed-camp-taman", sourceItemId: "seed-item-gor-water", createdById: headFor("seed-camp-gor-sidoarjo", "LOGISTICS").id, itemName: "Air Mineral 600ml", quantity: 40, unit: "dus", notes: "Pengiriman air untuk posko dengan okupansi tinggi.", status: "SHIPPED", createdAt: dateDaysAgo(7, 2), shippedAt: dateDaysAgo(2), receivedAt: null },
+	{ id: "seed-distribution-received-candi-waru-hygiene", requestId: "seed-request-received-candi-waru-hygiene", sourceCampId: "seed-camp-candi", destinationCampId: "seed-camp-waru", sourceItemId: "seed-item-candi-hygiene", createdById: headFor("seed-camp-candi", "LOGISTICS").id, itemName: "Paket Hygiene Kit Keluarga", quantity: 30, unit: "paket", notes: "Bantuan hygiene kit untuk keluarga dengan anak kecil.", status: "RECEIVED", createdAt: dateDaysAgo(11, 2), shippedAt: dateDaysAgo(6), receivedAt: dateDaysAgo(4) },
+	{ id: "seed-distribution-cancelled-taman-candi-rice", requestId: "seed-request-cancelled-taman-candi-rice", sourceCampId: "seed-camp-taman", destinationCampId: "seed-camp-candi", sourceItemId: "seed-item-taman-rice", createdById: headFor("seed-camp-taman", "LOGISTICS").id, itemName: "Beras Premium", quantity: 20, unit: "kg", notes: "Permintaan dibatalkan setelah pasokan lokal tiba.", status: "CANCELLED", createdAt: dateDaysAgo(9, 2), shippedAt: null, receivedAt: null },
 ];
 
 const movements: MovementSeed[] = [];
@@ -378,15 +581,15 @@ movements.push(
 );
 
 const auditLogs = [
-	{ id: "seed-audit-system-created", userId: userData.admin.id, action: "SEED", entity: "System", entityId: null, details: { message: "Fixture operasional dibuat", version: "complex-2026-09" }, createdAt: dateDaysAgo(30) },
+	{ id: "seed-audit-system-created", userId: userData.admin.id, action: "SEED", entity: "System", entityId: null, details: { message: "Fixture operasional dibuat", version: "natural-names-2026-10" }, createdAt: dateDaysAgo(30) },
 	{ id: "seed-audit-user-admin", userId: userData.admin.id, action: "CREATE", entity: "User", entityId: userData.admin.id, details: { name: userData.admin.name, role: userData.admin.role }, createdAt: dateDaysAgo(29) },
 	...camps.map((camp, index) => ({ id: `seed-audit-camp-${camp.key}`, userId: userData.admin.id, action: "CREATE", entity: "Camp", entityId: camp.id, details: { name: camp.name, status: camp.status }, createdAt: dateDaysAgo(28 - index) })),
 	...camps.flatMap((camp, index) => [
 		{ id: `seed-audit-manager-${camp.key}`, userId: userData.admin.id, action: "ASSIGN_MANAGER", entity: "Camp", entityId: camp.id, details: { managerId: managerFor(camp.id).id }, createdAt: dateDaysAgo(22 - index) },
 		...divisions.map((division, divisionIndex) => ({ id: `seed-audit-head-${camp.key}-${division.toLowerCase()}`, userId: userData.admin.id, action: "ASSIGN_DIVISION_HEAD", entity: "CampDivisionHead", entityId: `${camp.id}:${division}`, details: { division, userId: headFor(camp.id, division).id }, createdAt: dateDaysAgo(20 - index - divisionIndex) })),
 	]),
-	{ id: "seed-audit-stock-receipt", userId: headFor("seed-camp-candi", "LOGISTICS").id, action: "RECEIPT", entity: "InventoryMovement", entityId: "seed-item-candi-rice-receipt", details: { itemName: "Beras", quantity: 520, unit: "kg" }, createdAt: dateDaysAgo(30) },
-	{ id: "seed-audit-distribution-received", userId: headFor("seed-camp-waru", "LOGISTICS").id, action: "RECEIVE", entity: "Distribution", entityId: "seed-distribution-received-candi-waru-hygiene", details: { quantity: 30, itemName: "Hygiene Kit" }, createdAt: dateDaysAgo(4) },
+	{ id: "seed-audit-stock-receipt", userId: headFor("seed-camp-candi", "LOGISTICS").id, action: "RECEIPT", entity: "InventoryMovement", entityId: "seed-item-candi-rice-receipt", details: { itemName: "Beras Premium", quantity: 850, unit: "kg" }, createdAt: dateDaysAgo(30) },
+	{ id: "seed-audit-distribution-received", userId: headFor("seed-camp-waru", "LOGISTICS").id, action: "RECEIVE", entity: "Distribution", entityId: "seed-distribution-received-candi-waru-hygiene", details: { quantity: 30, itemName: "Paket Hygiene Kit Keluarga" }, createdAt: dateDaysAgo(4) },
 	{ id: "seed-audit-facility-damaged", userId: headFor("seed-camp-gor-sidoarjo", "SHELTER").id, action: "UPDATE", entity: "FacilityReport", entityId: "seed-facility-gor-sidoarjo-water", details: { status: "DAMAGED" }, createdAt: dateDaysAgo(3) },
 ];
 
@@ -400,11 +603,50 @@ async function upsertCamp(camp: CampSeed) {
 
 async function upsertUser(user: UserSeed, passwordHash: string) {
 	const seedId = user.id;
-	const saved = await prisma.user.upsert({
-		where: { email: user.email },
-		update: { name: user.name, password: passwordHash, role: user.role, division: user.division, campId: user.campId },
-		create: { id: user.id, name: user.name, email: user.email, password: passwordHash, role: user.role, division: user.division, campId: user.campId, createdAt: dateDaysAgo(29) },
-	});
+	const existingById = await prisma.user.findUnique({ where: { id: user.id } });
+	const existingByEmail = await prisma.user.findUnique({ where: { email: user.email } });
+
+	let saved;
+	if (existingById) {
+		if (existingByEmail && existingByEmail.id !== existingById.id) {
+			await prisma.user.delete({ where: { id: existingByEmail.id } }).catch(() => {});
+		}
+		saved = await prisma.user.update({
+			where: { id: user.id },
+			data: {
+				name: user.name,
+				email: user.email,
+				password: passwordHash,
+				role: user.role,
+				division: user.division,
+				campId: user.campId,
+			},
+		});
+	} else if (existingByEmail) {
+		saved = await prisma.user.update({
+			where: { id: existingByEmail.id },
+			data: {
+				name: user.name,
+				password: passwordHash,
+				role: user.role,
+				division: user.division,
+				campId: user.campId,
+			},
+		});
+	} else {
+		saved = await prisma.user.create({
+			data: {
+				id: user.id,
+				name: user.name,
+				email: user.email,
+				password: passwordHash,
+				role: user.role,
+				division: user.division,
+				campId: user.campId,
+				createdAt: dateDaysAgo(29),
+			},
+		});
+	}
 	user.id = saved.id;
 	userIdMap.set(seedId, saved.id);
 	return saved;
@@ -494,11 +736,12 @@ async function validateSeed() {
 }
 
 async function main() {
-	console.log("Seeding complex operational fixture...");
+	console.log("Seeding operational fixture with natural Indonesian personnel and comprehensive stock items...");
 	const passwordHash = await bcrypt.hash(password, 12);
 
 	for (const camp of camps) await upsertCamp(camp);
 	for (const user of userData.users) await upsertUser(user, passwordHash);
+
 	const resolveUserId = (seedId: string) => userIdMap.get(seedId) ?? seedId;
 	for (const item of logisticsItems) item.createdById = resolveUserId(item.createdById);
 	for (const request of requests) {
@@ -507,6 +750,7 @@ async function main() {
 	}
 	for (const distribution of distributions) distribution.createdById = resolveUserId(distribution.createdById);
 	for (const movement of movements) movement.createdById = resolveUserId(movement.createdById);
+
 	for (const camp of camps) {
 		await prisma.camp.update({ where: { id: camp.id }, data: { managerId: managerFor(camp.id).id } });
 		for (const division of divisions) {
@@ -514,23 +758,27 @@ async function main() {
 			await prisma.campDivisionHead.upsert({ where: { campId_division: { campId: camp.id, division } }, update: { userId: head.id, createdAt: dateDaysAgo(25) }, create: { id: `seed-assignment-${camp.key}-${division.toLowerCase()}`, campId: camp.id, division, userId: head.id, createdAt: dateDaysAgo(25) } });
 		}
 	}
+
 	for (const item of logisticsItems) await upsertLogisticsItem(item);
 	for (const facility of facilities) await upsertFacility(facility);
 	for (const evacuee of evacuees) await upsertEvacuee(evacuee);
 	for (const request of requests) await upsertRequest(request);
 	for (const distribution of distributions) await upsertDistribution(distribution);
 	for (const movement of movements) await upsertMovement(movement);
+
 	for (const camp of camps) {
 		const currentOccupants = evacuees.filter((evacuee) => evacuee.campId === camp.id && !evacuee.departedAt).reduce((total, evacuee) => total + evacuee.totalFamily, 0);
 		await prisma.camp.update({ where: { id: camp.id }, data: { currentOccupants } });
 	}
+
 	for (const log of auditLogs) {
 		const userId = userIdMap.get(log.userId) ?? log.userId;
 		await prisma.auditLog.upsert({ where: { id: log.id }, update: { userId, action: log.action, entity: log.entity, entityId: log.entityId, details: JSON.stringify(log.details), createdAt: log.createdAt }, create: { id: log.id, userId, action: log.action, entity: log.entity, entityId: log.entityId, details: JSON.stringify(log.details), createdAt: log.createdAt } });
 	}
+
 	await validateSeed();
 
-	console.log(`Seed completed: ${camps.length} camps, ${userData.users.length} users, ${logisticsItems.length} logistics items, ${facilities.length} facilities, ${evacuees.length} evacuee records, ${requests.length} requests, ${distributions.length} distributions, ${movements.length} inventory movements, ${auditLogs.length} audit logs.`);
+	console.log(`Seed completed: ${camps.length} camps, ${userData.users.length} users (all with natural Indonesian names), ${logisticsItems.length} logistics items, ${facilities.length} facilities, ${evacuees.length} evacuee records, ${requests.length} requests, ${distributions.length} distributions, ${movements.length} inventory movements, ${auditLogs.length} audit logs.`);
 	console.log(`Development password: ${password}`);
 	console.log(`Scenario date: ${seedAsOf.toISOString()}`);
 }

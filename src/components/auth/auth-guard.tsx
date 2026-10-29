@@ -11,7 +11,7 @@ import { LogOut } from "lucide-react";
 export function AuthGuard({ children }: { children: React.ReactNode }) {
 	const router = useRouter();
 	const pathname = usePathname();
-	const { user, loading, status } = useSession();
+	const { user, loading, status, refresh } = useSession();
 
 	useEffect(() => {
 		if (!loading && (status === "unauthenticated" || status === "expired")) {
@@ -34,7 +34,26 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 		);
 	}
 
-	if (loading || status === "error" || !user) {
+	if (!loading && status === "error" && !user) {
+		return (
+			<div className="min-h-screen flex items-center justify-center p-6">
+				<div className="max-w-md space-y-4 text-center">
+					<Alert type="error">
+						Gagal memuat sesi. Periksa koneksi Anda lalu coba lagi.
+					</Alert>
+					<button
+						type="button"
+						onClick={() => void refresh()}
+						className="text-sm font-medium text-blue-600 hover:underline"
+					>
+						Coba lagi
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	if (loading || !user) {
 		return (
 			<div className="min-h-screen flex items-center justify-center">
 				<span className="text-gray-500" aria-live="polite">Memuat sesi...</span>

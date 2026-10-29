@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { InventoryMovementType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { isSerializationConflict } from "@/lib/prisma-errors";
 import { convertBaseToStock, convertToBase, type UnitDefinition } from "@/lib/unit-conversion";
 
 type Transaction = Prisma.TransactionClient;
@@ -27,6 +28,37 @@ type DistributionInput = {
 };
 
 const movementType = (type: InventoryMovementKind) => type as InventoryMovementType;
+
+// Exclude blob base64 receiptProofData dari respons standar distribusi
+// agar payload tetap kecil (< 50 KB) dan terhindar dari batas response 4.5 MB Vercel.
+export const DISTRIBUTION_SELECT = {
+	id: true,
+	requestId: true,
+	sourceCampId: true,
+	destinationCampId: true,
+	sourceItemId: true,
+	createdById: true,
+	itemName: true,
+	quantity: true,
+	unit: true,
+	requestedQuantity: true,
+	requestedUnit: true,
+	baseQuantity: true,
+	baseUnit: true,
+	unitDimension: true,
+	conversionFactor: true,
+	conversionStatus: true,
+	notes: true,
+	status: true,
+	shippedAt: true,
+	receivedAt: true,
+	receiptProofName: true,
+	receiptProofMimeType: true,
+	createdAt: true,
+	updatedAt: true,
+	sourceCamp: { select: { id: true, name: true } },
+	destinationCamp: { select: { id: true, name: true } },
+} as const;
 
 function itemUnitDefinition(item: ItemUnitFields): UnitDefinition {
 	return {
@@ -75,7 +107,7 @@ async function recordMovement(tx: Transaction, input: {
 	});
 }
 
-async function refreshOperationalStatus(tx: Transaction, logisticsItemId: string) {
+export async function refreshOperationalStatus(tx: Transaction, logisticsItemId: string) {
 	await tx.$executeRaw`
 		UPDATE "LogisticsItem"
 		SET "status" = CASE
@@ -89,51 +121,79 @@ async function refreshOperationalStatus(tx: Transaction, logisticsItemId: string
 	`;
 }
 
-async function runSerializable<T>(operation: (tx: Transaction) => Promise<T>) {
-	return prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+async function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function receiveStock(input: StockInput) {
-	assertPositiveInteger(input.quantity);
-	return runSerializable(async (tx) => {
-		const item = await tx.logisticsItem.findUnique({ where: { id: input.logisticsItemId } });
-		if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
-		const unitFields = itemUnitDefinition(item);
-		const baseQuantity = baseQuantityFor(item, input.quantity);
-
-		if (item.status === "SPOILED_OR_DAMAGED" || item.damagedQuantity > 0 || item.damagedQuantityBase > 0) {
-			const replacement = await tx.logisticsItem.create({
-				data: {
-					campId: item.campId,
-					itemName: item.itemName,
-					quantity: input.quantity,
-					reservedQuantity: 0,
-					damagedQuantity: 0,
-					minimumQuantity: item.minimumQuantity,
-					unit: item.unit,
-					baseUnit: item.baseUnit,
-					unitDimension: item.unitDimension,
-					conversionFactor: item.conversionFactor,
-					conversionStatus: item.conversionStatus,
-					conversionNote: item.conversionNote,
-					quantityBase: baseQuantity,
-					reservedQuantityBase: 0,
-					damagedQuantityBase: 0,
-					minimumQuantityBase: item.minimumQuantityBase,
-					status: "SUFFICIENT",
-					notes: input.reason?.trim() || `Stok pengganti untuk ${item.itemName}`,
-				},
-			});
-			await refreshOperationalStatus(tx, replacement.id);
-			await recordMovement(tx, { logisticsItemId: replacement.id, campId: replacement.campId, type: movementType("RECEIPT"), quantity: input.quantity, baseQuantity, unitFields, createdById: input.createdById, reason: input.reason ?? "Stok pengganti" });
-			return tx.logisticsItem.findUniqueOrThrow({ where: { id: replacement.id } });
+// Menjalankan transaksi Serializable dengan retry otomatis saat P2034 (konflik konkurensi).
+export async function runSerializable<T>(operation: (tx: Transaction) => Promise<T>, maxRetries = 3): Promise<T> {
+	let attempt = 0;
+	while (attempt < maxRetries) {
+		try {
+			return await prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+		} catch (error) {
+			attempt += 1;
+			if (attempt < maxRetries && isSerializationConflict(error)) {
+				const backoff = 25 * 2 ** attempt + Math.floor(Math.random() * 25);
+				await sleep(backoff);
+				continue;
+			}
+			throw error;
 		}
+	}
+	throw new Error("P2034_EXHAUSTED");
+}
 
-		await tx.logisticsItem.update({ where: { id: item.id }, data: { quantity: { increment: input.quantity }, quantityBase: { increment: baseQuantity } } });
-		await refreshOperationalStatus(tx, item.id);
-		await recordMovement(tx, { logisticsItemId: item.id, campId: item.campId, type: movementType("RECEIPT"), quantity: input.quantity, baseQuantity, unitFields, createdById: input.createdById, reason: input.reason });
-		return tx.logisticsItem.findUniqueOrThrow({ where: { id: item.id } });
-	});
+async function assertCampIsActive(tx: Transaction, campId: string) {
+	const camp = await tx.camp.findUnique({ where: { id: campId }, select: { status: true } });
+	if (!camp || camp.status !== "ACTIVE") throw new Error("CAMP_NOT_ACTIVE");
+}
+
+export async function receiveStockInTx(tx: Transaction, input: StockInput) {
+	assertPositiveInteger(input.quantity);
+	const item = await tx.logisticsItem.findUnique({ where: { id: input.logisticsItemId } });
+	if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
+	await assertCampIsActive(tx, item.campId);
+	const unitFields = itemUnitDefinition(item);
+	const baseQuantity = baseQuantityFor(item, input.quantity);
+
+	if (item.status === "SPOILED_OR_DAMAGED" || item.damagedQuantity > 0 || item.damagedQuantityBase > 0) {
+		const replacement = await tx.logisticsItem.create({
+			data: {
+				campId: item.campId,
+				itemName: item.itemName,
+				quantity: input.quantity,
+				reservedQuantity: 0,
+				damagedQuantity: 0,
+				minimumQuantity: item.minimumQuantity,
+				unit: item.unit,
+				baseUnit: item.baseUnit,
+				unitDimension: item.unitDimension,
+				conversionFactor: item.conversionFactor,
+				conversionStatus: item.conversionStatus,
+				conversionNote: item.conversionNote,
+				quantityBase: baseQuantity,
+				reservedQuantityBase: 0,
+				damagedQuantityBase: 0,
+				minimumQuantityBase: item.minimumQuantityBase,
+				status: "SUFFICIENT",
+				notes: input.reason?.trim() || `Stok pengganti untuk ${item.itemName}`,
+			},
+		});
+		await refreshOperationalStatus(tx, replacement.id);
+		await recordMovement(tx, { logisticsItemId: replacement.id, campId: replacement.campId, type: movementType("RECEIPT"), quantity: input.quantity, baseQuantity, unitFields, createdById: input.createdById, reason: input.reason ?? "Stok pengganti" });
+		return tx.logisticsItem.findUniqueOrThrow({ where: { id: replacement.id } });
+	}
+
+	await tx.logisticsItem.update({ where: { id: item.id }, data: { quantity: { increment: input.quantity }, quantityBase: { increment: baseQuantity } } });
+	await refreshOperationalStatus(tx, item.id);
+	await recordMovement(tx, { logisticsItemId: item.id, campId: item.campId, type: movementType("RECEIPT"), quantity: input.quantity, baseQuantity, unitFields, createdById: input.createdById, reason: input.reason });
+	return tx.logisticsItem.findUniqueOrThrow({ where: { id: item.id } });
+}
+
+export async function receiveStock(input: StockInput, externalTx?: Transaction) {
+	if (externalTx) return receiveStockInTx(externalTx, input);
+	return runSerializable((tx) => receiveStockInTx(tx, input));
 }
 
 async function adjustOutOfStock(input: StockInput, type: "DAMAGE" | "LOSS") {
@@ -142,6 +202,7 @@ async function adjustOutOfStock(input: StockInput, type: "DAMAGE" | "LOSS") {
 	return runSerializable(async (tx) => {
 		const item = await tx.logisticsItem.findUnique({ where: { id: input.logisticsItemId } });
 		if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
+		await assertCampIsActive(tx, item.campId);
 		const unitFields = itemUnitDefinition(item);
 		const baseQuantity = baseQuantityFor(item, input.quantity);
 		const damagedDisplayIncrement = type === "DAMAGE" ? input.quantity : 0;
@@ -174,6 +235,7 @@ export async function restoreStock(input: StockInput) {
 	return runSerializable(async (tx) => {
 		const item = await tx.logisticsItem.findUnique({ where: { id: input.logisticsItemId } });
 		if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
+		await assertCampIsActive(tx, item.campId);
 		const unitFields = itemUnitDefinition(item);
 		const baseQuantity = baseQuantityFor(item, input.quantity);
 		if (item.damagedQuantity < input.quantity || item.damagedQuantityBase < baseQuantity) throw new Error("RESTORE_QUANTITY_EXCEEDS_DAMAGED");
@@ -198,6 +260,7 @@ export async function disposeStock(input: StockInput) {
 	return runSerializable(async (tx) => {
 		const item = await tx.logisticsItem.findUnique({ where: { id: input.logisticsItemId } });
 		if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
+		await assertCampIsActive(tx, item.campId);
 		const unitFields = itemUnitDefinition(item);
 		const baseQuantity = baseQuantityFor(item, input.quantity);
 		const changed = await tx.$executeRaw`
@@ -227,6 +290,8 @@ async function reserveDistributionInTransaction(tx: Transaction, input: { distri
 	const distribution = await tx.distribution.findUnique({ where: { id: input.distributionId } });
 	if (!distribution) throw new Error("DISTRIBUTION_NOT_FOUND");
 	if (distribution.status !== "APPROVED") throw new Error("INVALID_DISTRIBUTION_STATUS");
+	await assertCampIsActive(tx, distribution.sourceCampId);
+	await assertCampIsActive(tx, distribution.destinationCampId);
 	const sourceItem = await sourceItemForDistribution(tx, distribution);
 	const unitFields = itemUnitDefinition(sourceItem);
 	const baseQuantity = distribution.baseQuantity ?? baseQuantityFor(sourceItem, distribution.quantity);
@@ -245,7 +310,7 @@ async function reserveDistributionInTransaction(tx: Transaction, input: { distri
 	await tx.logisticsRequest.updateMany({ where: { id: distribution.requestId, status: "APPROVED" }, data: { status: "RESERVED" } });
 	await refreshOperationalStatus(tx, sourceItem.id);
 	await recordMovement(tx, { logisticsItemId: sourceItem.id, campId: sourceItem.campId, type: movementType("RESERVATION"), quantity: distribution.quantity, baseQuantity, unitFields, createdById: input.createdById, distributionId: distribution.id, reason: input.reason ?? "Distribusi disetujui" });
-	return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id } });
+	return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, select: DISTRIBUTION_SELECT });
 }
 
 export async function approveAndReserveDistribution(input: { requestId: string; sourceItemId: string; quantity: number; createdById: string }) {
@@ -255,6 +320,8 @@ export async function approveAndReserveDistribution(input: { requestId: string; 
 		if (!request) throw new Error("DISTRIBUTION_REQUEST_NOT_FOUND");
 		if (request.status !== "PENDING") throw new Error("INVALID_REQUEST_STATUS");
 		if (input.quantity > request.quantity) throw new Error("QUANTITY_EXCEEDS_REQUEST");
+		await assertCampIsActive(tx, request.sourceCampId);
+		await assertCampIsActive(tx, request.destinationCampId);
 		const sourceItem = await tx.logisticsItem.findUnique({ where: { id: input.sourceItemId } });
 		if (!sourceItem || sourceItem.status === "SPOILED_OR_DAMAGED" || sourceItem.damagedQuantity > 0 || sourceItem.campId !== request.sourceCampId || sourceItem.itemName.toLowerCase() !== request.itemName.toLowerCase() || sourceItem.unit.toLowerCase() !== request.unit.toLowerCase() || sourceItem.damagedQuantityBase > 0 || (request.baseUnit !== null && (sourceItem.baseUnit !== request.baseUnit || sourceItem.unitDimension !== request.unitDimension || sourceItem.conversionFactor !== request.conversionFactor || sourceItem.conversionStatus !== request.conversionStatus))) throw new Error("SOURCE_STOCK_MISMATCH");
 		const baseQuantity = baseQuantityFor(sourceItem, input.quantity);
@@ -262,7 +329,7 @@ export async function approveAndReserveDistribution(input: { requestId: string; 
 		if (locked.count !== 1) throw new Error("INVALID_REQUEST_STATUS");
 		const distribution = await tx.distribution.create({ data: { requestId: request.id, sourceCampId: request.sourceCampId, destinationCampId: request.destinationCampId, sourceItemId: sourceItem.id, createdById: input.createdById, itemName: sourceItem.itemName, quantity: input.quantity, unit: sourceItem.unit, requestedQuantity: request.requestedQuantity, requestedUnit: request.requestedUnit, baseQuantity, baseUnit: sourceItem.baseUnit, unitDimension: sourceItem.unitDimension, conversionFactor: sourceItem.conversionFactor, conversionStatus: sourceItem.conversionStatus, notes: request.notes, status: "APPROVED" } });
 		await reserveDistributionInTransaction(tx, { distributionId: distribution.id, createdById: input.createdById });
-		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, include: { sourceCamp: true, destinationCamp: true } });
+		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, select: DISTRIBUTION_SELECT });
 	});
 }
 
@@ -290,7 +357,7 @@ export async function releaseReservation(input: DistributionInput) {
 		await tx.logisticsRequest.updateMany({ where: { id: distribution.requestId, status: "RESERVED" }, data: { status: "CANCELLED" } });
 		await refreshOperationalStatus(tx, sourceItem.id);
 		await recordMovement(tx, { logisticsItemId: sourceItem.id, campId: sourceItem.campId, type: movementType("RESERVATION_RELEASE"), quantity: distribution.quantity, baseQuantity, unitFields: itemUnitDefinition(sourceItem), createdById: input.createdById, distributionId: distribution.id, reason: input.reason ?? "Distribusi dibatalkan sebelum dikirim" });
-		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id } });
+		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, select: DISTRIBUTION_SELECT });
 	});
 }
 
@@ -299,6 +366,8 @@ export async function shipStock(input: DistributionInput) {
 		const distribution = await tx.distribution.findUnique({ where: { id: input.distributionId } });
 		if (!distribution) throw new Error("DISTRIBUTION_NOT_FOUND");
 		if (distribution.status !== "RESERVED") throw new Error("INVALID_DISTRIBUTION_STATUS");
+		await assertCampIsActive(tx, distribution.sourceCampId);
+		await assertCampIsActive(tx, distribution.destinationCampId);
 		const sourceItem = await sourceItemForDistribution(tx, distribution);
 		const baseQuantity = distribution.baseQuantity ?? baseQuantityFor(sourceItem, distribution.quantity);
 		const shipped = await tx.$executeRaw`
@@ -318,7 +387,7 @@ export async function shipStock(input: DistributionInput) {
 		await tx.logisticsRequest.updateMany({ where: { id: distribution.requestId, status: "RESERVED" }, data: { status: "SHIPPED" } });
 		await refreshOperationalStatus(tx, sourceItem.id);
 		await recordMovement(tx, { logisticsItemId: sourceItem.id, campId: sourceItem.campId, type: movementType("DISTRIBUTION_OUT"), quantity: distribution.quantity, baseQuantity, unitFields: itemUnitDefinition(sourceItem), createdById: input.createdById, distributionId: distribution.id, reason: input.reason ?? "Distribusi dikirim" });
-		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id } });
+		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, select: DISTRIBUTION_SELECT });
 	});
 }
 
@@ -327,6 +396,7 @@ export async function receiveDistribution(input: DistributionInput) {
 		const distribution = await tx.distribution.findUnique({ where: { id: input.distributionId } });
 		if (!distribution) throw new Error("DISTRIBUTION_NOT_FOUND");
 		if (distribution.status !== "SHIPPED") throw new Error("INVALID_DISTRIBUTION_STATUS");
+		await assertCampIsActive(tx, distribution.destinationCampId);
 		const baseQuantity = distribution.baseQuantity ?? distribution.quantity;
 		const changed = await tx.$executeRaw`
 			UPDATE "Distribution"
@@ -387,6 +457,6 @@ export async function receiveDistribution(input: DistributionInput) {
 		await tx.logisticsItem.update({ where: { id: target.id }, data: { quantity: { increment: targetQuantity }, quantityBase: { increment: baseQuantity } } });
 		await refreshOperationalStatus(tx, target.id);
 		await recordMovement(tx, { logisticsItemId: target.id, campId: distribution.destinationCampId, type: movementType("DISTRIBUTION_IN"), quantity: targetQuantity, baseQuantity, unitFields: targetDefinition, createdById: input.createdById, distributionId: distribution.id, reason: input.reason ?? "Distribusi diterima" });
-		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id } });
+		return tx.distribution.findUniqueOrThrow({ where: { id: distribution.id }, select: DISTRIBUTION_SELECT });
 	});
 }

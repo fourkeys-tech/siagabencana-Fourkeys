@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
-import { canManageRequest, canReceiveDistribution, canReviewRequest, isPositiveInteger } from "@/lib/distribution";
+import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { canManageRequest, canReceiveDistribution, canReviewRequest, canWithdrawRequest, hasDistributionAccess, isPositiveInteger } from "@/lib/distribution";
 import { approveAndReserveDistribution, receiveDistribution, releaseReservation, shipStock } from "@/lib/inventory";
+import { writeAuditLog } from "@/lib/audit";
+import { isSerializationConflict, SERIALIZATION_CONFLICT_MESSAGE } from "@/lib/prisma-errors";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { MAX_NOTE_LENGTH, validateOptionalText, validateText } from "@/lib/validation";
 
 type Params = { params: Promise<{ id: string }> };
 
-const RECEIPT_PROOF_MAX_BYTES = 5 * 1024 * 1024;
+// Batas body request Vercel 4.5 MB; sisakan ruang untuk overhead multipart.
+const RECEIPT_PROOF_MAX_BYTES = 3 * 1024 * 1024;
 const RECEIPT_PROOF_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function hasValidImageSignature(bytes: ArrayBuffer, mimeType: string) {
@@ -64,6 +69,8 @@ function inventoryError(error: unknown) {
 		BASE_UNIT_DIMENSION_MISMATCH: { status: 400, message: "Unit dasar stok tidak sesuai dengan dimensi barang." },
 		UNIT_REQUIRED: { status: 400, message: "Definisi unit stok tidak lengkap." },
 		UNIT_NOT_SUPPORTED: { status: 400, message: "Unit tidak tersedia di katalog unit." },
+		CAMP_NOT_ACTIVE: { status: 409, message: "Posko sudah ditutup sehingga tidak dapat memproses distribusi." },
+		P2034_EXHAUSTED: { status: 409, message: SERIALIZATION_CONFLICT_MESSAGE },
 	};
 	return errors[error.message] ?? null;
 }
@@ -91,8 +98,7 @@ export async function GET(_request: Request, { params }: Params) {
 export async function PUT(request: Request, { params }: Params) {
 	try {
 		const user = await requireAuth();
-		const canOperateDistribution = user.role === "SUPER_ADMIN" || (Boolean(user.campId) && (user.role === "MANAGER" || canManageDivision(user, "LOGISTICS", user.campId!)));
-		if (!canOperateDistribution) return NextResponse.json({ success: false, message: "Fitur distribusi hanya tersedia untuk Manager atau tim logistik posko." }, { status: 403 });
+		if (!hasDistributionAccess(user)) return NextResponse.json({ success: false, message: "Fitur distribusi hanya tersedia untuk Manager atau tim logistik posko." }, { status: 403 });
 		const { id } = await params;
 		const isMultipart = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
 		let body: Record<string, unknown>;
@@ -107,14 +113,17 @@ export async function PUT(request: Request, { params }: Params) {
 			if (String(body.action).toUpperCase() === "RECEIVE") {
 				const proof = form.get("proof");
 				if (!(proof instanceof File)) return NextResponse.json({ success: false, message: "Bukti penerimaan berupa gambar wajib dilampirkan." }, { status: 400 });
-				if (!RECEIPT_PROOF_TYPES.has(proof.type) || proof.size <= 0 || proof.size > RECEIPT_PROOF_MAX_BYTES) return NextResponse.json({ success: false, message: "Bukti harus berupa JPG, PNG, atau WebP maksimal 5 MB." }, { status: 400 });
+				if (!RECEIPT_PROOF_TYPES.has(proof.type) || proof.size <= 0 || proof.size > RECEIPT_PROOF_MAX_BYTES) return NextResponse.json({ success: false, message: "Bukti harus berupa JPG, PNG, atau WebP maksimal 3 MB." }, { status: 400 });
 				const bytes = await proof.arrayBuffer();
 				if (!hasValidImageSignature(bytes, proof.type)) return NextResponse.json({ success: false, message: "Isi file bukti bukan gambar yang valid." }, { status: 400 });
 				receiptProofData = `data:${proof.type};base64,${Buffer.from(bytes).toString("base64")}`;
 				receiptProofName = proof.name.slice(0, 255);
 				receiptProofMimeType = proof.type;
 			}
-		} else body = await request.json() as Record<string, unknown>;
+		} else body = await readJson(request);
+
+		const reasonError = validateOptionalText(body.reason, "Alasan", MAX_NOTE_LENGTH);
+		if (reasonError) return NextResponse.json({ success: false, message: reasonError }, { status: 400 });
 
 		const action = String(body.action ?? "").toUpperCase();
 		if (action === "RECEIVE" && !receiptProofData) return NextResponse.json({ success: false, message: "Bukti penerimaan berupa gambar wajib dilampirkan." }, { status: 400 });
@@ -124,16 +133,19 @@ export async function PUT(request: Request, { params }: Params) {
 			if (action === "CANCEL") {
 				if (user.role !== "SUPER_ADMIN" && !canReviewRequest(user, distribution.sourceCampId)) return NextResponse.json({ success: false, message: "Hanya Super Admin atau logistik posko asal yang dapat membatalkan reservasi." }, { status: 403 });
 				const result = await releaseReservation({ distributionId: id, createdById: user.id, reason: typeof body.reason === "string" ? body.reason : undefined });
+				await writeAuditLog({ userId: user.id, action: "CANCEL", entity: "Distribution", entityId: id, details: { itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit } });
 				return NextResponse.json({ success: true, message: "Distribusi dibatalkan dan reservasi dilepas.", data: result });
 			}
 			if (action === "SHIP") {
 				if (user.role !== "SUPER_ADMIN" && !canReviewRequest(user, distribution.sourceCampId)) return NextResponse.json({ success: false, message: "Hanya Super Admin atau logistik posko asal yang dapat mengirim distribusi." }, { status: 403 });
 				const result = await shipStock({ distributionId: id, createdById: user.id, reason: typeof body.reason === "string" ? body.reason : undefined });
+				await writeAuditLog({ userId: user.id, action: "SHIP", entity: "Distribution", entityId: id, details: { itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit } });
 				return NextResponse.json({ success: true, message: "Distribusi dikirim dan stok asal berkurang.", data: result });
 			}
 			if (action === "RECEIVE") {
 				if (!canReceiveDistribution(user, distribution.destinationCampId)) return NextResponse.json({ success: false, message: "Hanya Manager atau petugas logistik posko tujuan yang dapat menerima distribusi." }, { status: 403 });
 				const result = await receiveDistribution({ distributionId: id, createdById: user.id, reason: String(body.reason ?? "").trim(), receiptProofData, receiptProofName, receiptProofMimeType });
+				await writeAuditLog({ userId: user.id, action: "RECEIVE", entity: "Distribution", entityId: id, details: { itemName: distribution.itemName, quantity: distribution.quantity, unit: distribution.unit } });
 				return NextResponse.json({ success: true, message: "Distribusi diterima dan stok tujuan bertambah.", data: result });
 			}
 			return NextResponse.json({ success: false, message: "Aksi distribusi tidak valid." }, { status: 400 });
@@ -141,13 +153,22 @@ export async function PUT(request: Request, { params }: Params) {
 
 		const logisticsRequest = await getRequest(id);
 		if (!logisticsRequest) return NextResponse.json({ success: false, message: "Permintaan distribusi tidak ditemukan." }, { status: 404 });
+		if (action === "WITHDRAW") {
+			if (!canWithdrawRequest(user, logisticsRequest)) return NextResponse.json({ success: false, message: "Hanya pemohon atau Manager posko tujuan yang dapat menarik permintaan." }, { status: 403 });
+			const changed = await prisma.logisticsRequest.updateMany({ where: { id, status: "PENDING" }, data: { status: "CANCELLED" } });
+			if (changed.count !== 1) return NextResponse.json({ success: false, message: "Permintaan sudah diproses dan tidak dapat ditarik." }, { status: 409 });
+			await writeAuditLog({ userId: user.id, action: "WITHDRAW", entity: "LogisticsRequest", entityId: id, details: { itemName: logisticsRequest.itemName } });
+			return NextResponse.json({ success: true, message: "Permintaan distribusi ditarik." });
+		}
 		if (user.role !== "SUPER_ADMIN") return NextResponse.json({ success: false, message: "Hanya Super Admin yang dapat mereview permintaan." }, { status: 403 });
 		if (logisticsRequest.status !== "PENDING") return NextResponse.json({ success: false, message: "Permintaan sudah diproses." }, { status: 409 });
 		if (action === "REJECT") {
-			const rejectionReason = String(body.rejectionReason ?? "").trim();
-			if (!rejectionReason) return NextResponse.json({ success: false, message: "Alasan penolakan wajib diisi." }, { status: 400 });
+			const rejectionError = validateText(body.rejectionReason, "Alasan penolakan", MAX_NOTE_LENGTH);
+			if (rejectionError) return NextResponse.json({ success: false, message: rejectionError }, { status: 400 });
+			const rejectionReason = String(body.rejectionReason).trim();
 			const changed = await prisma.logisticsRequest.updateMany({ where: { id, status: "PENDING" }, data: { status: "REJECTED", reviewedById: user.id, rejectionReason } });
 			if (changed.count !== 1) return NextResponse.json({ success: false, message: "Permintaan sudah diproses." }, { status: 409 });
+			await writeAuditLog({ userId: user.id, action: "REJECT", entity: "LogisticsRequest", entityId: id, details: { itemName: logisticsRequest.itemName, rejectionReason } });
 			return NextResponse.json({ success: true, message: "Permintaan distribusi ditolak." });
 		}
 		if (action !== "APPROVE") return NextResponse.json({ success: false, message: "Aksi review tidak valid." }, { status: 400 });
@@ -160,8 +181,11 @@ export async function PUT(request: Request, { params }: Params) {
 			quantity,
 			createdById: user.id,
 		});
+		await writeAuditLog({ userId: user.id, action: "APPROVE", entity: "LogisticsRequest", entityId: id, details: { itemName: logisticsRequest.itemName, sourceItemId, quantity } });
 		return NextResponse.json({ success: true, message: "Permintaan disetujui dan stok berhasil direservasi.", data: result });
 	} catch (error) {
+		if (isInvalidJson(error)) return invalidJsonResponse();
+		if (isSerializationConflict(error)) return NextResponse.json({ success: false, message: SERIALIZATION_CONFLICT_MESSAGE }, { status: 409 });
 		const known = inventoryError(error);
 		if (known) return NextResponse.json({ success: false, message: known.message }, { status: known.status });
 		if (isAuthError(error)) return authError(error);

@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { object, v, validationMessage } from "../src/lib/validation";
+import { isValidTotalFamily, object, v, validatePassword, validationMessage } from "../src/lib/validation";
+
+describe("isValidTotalFamily", () => {
+	it("menolak NaN, desimal, dan nol", () => {
+		expect(isValidTotalFamily(Number.NaN)).toBe(false);
+		expect(isValidTotalFamily("abc")).toBe(false);
+		expect(isValidTotalFamily(1.5)).toBe(false);
+		expect(isValidTotalFamily(0)).toBe(false);
+		expect(isValidTotalFamily(-2)).toBe(false);
+	});
+
+	it("menerima bilangan bulat positif", () => {
+		expect(isValidTotalFamily(3)).toBe(true);
+		expect(isValidTotalFamily("4")).toBe(true);
+	});
+});
+
+describe("validatePassword", () => {
+	it("menolak password pendek atau bukan teks", () => {
+		expect(validatePassword("1234567")).toMatch(/minimal 8/);
+		expect(validatePassword(undefined)).not.toBeNull();
+		expect(validatePassword("x".repeat(129))).toMatch(/maksimal/);
+	});
+
+	it("menerima password minimal 8 karakter", () => {
+		expect(validatePassword("12345678")).toBeNull();
+	});
+});
 
 describe("validation helpers", () => {
 	it("parses simple string field", () => {

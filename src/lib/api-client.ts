@@ -5,6 +5,13 @@ type ApiResponse<T> = {
 	status: number;
 };
 
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+	unauthorizedHandler = handler;
+}
+
 async function request<T>(
 	method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
 	path: string,
@@ -16,6 +23,11 @@ async function request<T>(
 			headers: body ? { "Content-Type": "application/json" } : undefined,
 			body: body ? JSON.stringify(body) : undefined,
 		});
+
+		if (response.status === 401 && unauthorizedHandler) {
+			unauthorizedHandler();
+		}
+
 		const json = await response.json().catch(() => ({ success: false, message: "Respons tidak valid." }));
 		return {
 			ok: response.ok && json.success !== false,

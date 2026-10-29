@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardLabel, CardValue } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useSession } from "@/components/auth/user-provider";
 
 interface ReportData {
 	period: { from: string | null; to: string | null };
@@ -37,6 +38,7 @@ interface ReportData {
 		problemLogistics: number;
 		damagedFacilities: number;
 	}>;
+	canViewEvacueeNames: boolean;
 	evacuees: Array<{
 		id: string;
 		name: string;
@@ -85,6 +87,8 @@ function dateLabel(value: string | null) {
 }
 
 export default function ReportsPage() {
+	const { user } = useSession();
+	const canExportSheets = user?.role === "SUPER_ADMIN" || user?.role === "MANAGER";
 	const now = new Date();
 	const [from, setFrom] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`);
 	const [to, setTo] = useState(now.toISOString().slice(0, 10));
@@ -147,7 +151,7 @@ export default function ReportsPage() {
 				</div>
 				<div className="flex flex-wrap gap-2 print:hidden">
 					<Button variant="secondary" onClick={() => window.print()} disabled={!data}>Export PDF</Button>
-					<Button onClick={exportToGoogleSheets} disabled={!data || exportingSheets}>{exportingSheets ? "Mengirim..." : "Kirim ke Google Sheets"}</Button>
+					{canExportSheets && <Button onClick={exportToGoogleSheets} disabled={!data || exportingSheets}>{exportingSheets ? "Mengirim..." : "Kirim ke Google Sheets"}</Button>}
 				</div>
 			</div>
 
@@ -186,7 +190,7 @@ export default function ReportsPage() {
 
 				<section className="rounded-lg border bg-white shadow-sm print:break-before-page">
 					<div className="border-b px-5 py-4"><h2 className="font-semibold">Aktivitas Pengungsi</h2></div>
-					<div className="min-w-0 overflow-x-auto" role="region" aria-label="Data laporan" tabIndex={0}><table className="min-w-[60rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Nama", "Posko", "Jumlah Keluarga", "Kebutuhan Khusus", "Tiba", "Keluar"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.evacuees.map((record) => <tr key={record.id}><td className="px-5 py-3 text-sm font-medium">{record.name}</td><td className="px-5 py-3 text-sm">{record.camp.name}</td><td className="px-5 py-3 text-sm">{record.totalFamily}</td><td className="px-5 py-3 text-sm">{record.hasSpecialNeeds ? "Ya" : "Tidak"}</td><td className="px-5 py-3 text-sm">{dateLabel(record.arrivedAt)}</td><td className="px-5 py-3 text-sm">{dateLabel(record.departedAt)}</td></tr>)}</tbody></table></div>
+					{!data.canViewEvacueeNames ? <p className="px-5 py-4 text-sm text-slate-500">Data pribadi pengungsi hanya untuk pimpinan dan divisi pendataan. Total tercatat: {data.summary.totalEvacueeRecords} KK ({data.summary.totalEvacueeFamilies} jiwa), {data.summary.specialNeeds} dengan kebutuhan khusus.</p> : <div className="min-w-0 overflow-x-auto" role="region" aria-label="Data laporan" tabIndex={0}><table className="min-w-[60rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Nama", "Posko", "Jumlah Keluarga", "Kebutuhan Khusus", "Tiba", "Keluar"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.evacuees.map((record) => <tr key={record.id}><td className="px-5 py-3 text-sm font-medium">{record.name}</td><td className="px-5 py-3 text-sm">{record.camp.name}</td><td className="px-5 py-3 text-sm">{record.totalFamily}</td><td className="px-5 py-3 text-sm">{record.hasSpecialNeeds ? "Ya" : "Tidak"}</td><td className="px-5 py-3 text-sm">{dateLabel(record.arrivedAt)}</td><td className="px-5 py-3 text-sm">{dateLabel(record.departedAt)}</td></tr>)}</tbody></table></div>}
 				</section>
 
 				<section className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="font-semibold">Logistik</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Logistik laporan" tabIndex={0}><table className="min-w-[64rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Posko", "Jumlah", "Saldo dasar", "Status konversi", "Status"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{data.logistics.map((item) => <tr key={item.id}><td className="px-5 py-3 text-sm font-medium">{item.itemName}</td><td className="px-5 py-3 text-sm">{item.camp.name}</td><td className="px-5 py-3 text-sm">{item.quantity} {item.unit}</td><td className="px-5 py-3 text-sm">{item.quantityBase} {item.baseUnit}</td><td className="px-5 py-3 text-sm">{item.conversionStatus === "NEEDS_REVIEW" ? "Perlu verifikasi" : "Terverifikasi"}</td><td className="px-5 py-3"><Badge label={item.status} /></td></tr>)}</tbody></table></div></section>

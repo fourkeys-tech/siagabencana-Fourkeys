@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, getAccessibleCampWhere, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { campValidationMessage, parseCampInput } from "@/lib/camp-validation";
+import { writeAuditLog } from "@/lib/audit";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
 
 export async function GET() {
 	try {
 		const user = await requireAuth();
+		const canSeeStaffEmail = user.role === "SUPER_ADMIN" || user.role === "MANAGER";
+
 		const camps = await prisma.camp.findMany({
 			where: getAccessibleCampWhere(user),
 			orderBy: { createdAt: "desc" },
@@ -19,8 +23,26 @@ export async function GET() {
 				currentOccupants: true,
 				status: true,
 				managerId: true,
-				manager: { select: { id: true, name: true, email: true } },
-				divisionHeads: { include: { user: { select: { id: true, name: true, email: true } } } },
+				manager: {
+					select: {
+						id: true,
+						name: true,
+						...(canSeeStaffEmail ? { email: true } : {}),
+					},
+				},
+				divisionHeads: {
+					select: {
+						id: true,
+						division: true,
+						user: {
+							select: {
+								id: true,
+								name: true,
+								...(canSeeStaffEmail ? { email: true } : {}),
+							},
+						},
+					},
+				},
 			},
 		});
 		return NextResponse.json({ success: true, data: camps });
@@ -33,8 +55,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
 	try {
-		await requireRole("SUPER_ADMIN");
-		const body = await request.json() as Record<string, unknown>;
+		const admin = await requireRole("SUPER_ADMIN");
+		const body = await readJson(request);
 		let campInput;
 		try {
 			campInput = parseCampInput({ ...body, status: body.status ?? "ACTIVE" });
@@ -42,10 +64,13 @@ export async function POST(request: Request) {
 			return NextResponse.json({ success: false, message: campValidationMessage(validationError) ?? "Data posko tidak valid." }, { status: 400 });
 		}
 		const camp = await prisma.camp.create({ data: campInput });
+		await writeAuditLog({ userId: admin.id, action: "CREATE", entity: "Camp", entityId: camp.id, details: { name: camp.name, maxCapacity: camp.maxCapacity } });
 		return NextResponse.json({ success: true, message: "Posko berhasil dibuat. Tetapkan manager dan kepala divisi melalui Manajemen Pengguna.", data: camp }, { status: 201 });
 	} catch (error) {
+		if (isInvalidJson(error)) return invalidJsonResponse();
 		if (isAuthError(error)) return authError(error, "Hanya Super Admin yang dapat membuat posko.");
 		console.error("CREATE_CAMP_ERROR", error);
 		return NextResponse.json({ success: false, message: "Gagal membuat posko." }, { status: 500 });
 	}
 }
+

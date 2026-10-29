@@ -13,7 +13,10 @@ export function FormField({
 	step,
 	min,
 	max,
+	minLength,
+	maxLength,
 	readOnly,
+	disabled,
 	id,
 }: {
 	label: string;
@@ -26,7 +29,10 @@ export function FormField({
 	step?: string | number;
 	min?: string | number;
 	max?: string | number;
+	minLength?: number;
+	maxLength?: number;
 	readOnly?: boolean;
+	disabled?: boolean;
 	id?: string;
 }) {
 	const generatedId = useId();
@@ -51,7 +57,10 @@ export function FormField({
 				step={step}
 				min={min}
 				max={max}
+				minLength={minLength}
+				maxLength={maxLength}
 				readOnly={readOnly}
+				disabled={disabled}
 			/>
 			{error && <p id={`${inputId}-error`} className="mt-1 text-xs text-rose-600">{error}</p>}
 		</div>

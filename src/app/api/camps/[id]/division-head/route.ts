@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireRole } from "@/lib/auth/guard";
+import { writeAuditLog } from "@/lib/audit";
+import { assertCampActive, campError } from "@/lib/camps";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
 import { DivisionType } from "@prisma/client";
 
 type Params = { params: Promise<{ id: string }> };
@@ -10,12 +13,13 @@ export async function PUT(request: Request, { params }: Params) {
 	try {
 		const admin = await requireRole("SUPER_ADMIN");
 		const { id: campId } = await params;
-		const body = await request.json() as Record<string, unknown>;
+		const body = await readJson(request);
 		const division = String(body.division ?? "") as DivisionType;
 		const userId = body.userId ? String(body.userId) : null;
 		if (!validDivisions.includes(division)) return NextResponse.json({ success: false, message: "Divisi tidak valid." }, { status: 400 });
-		const camp = await prisma.camp.findUnique({ where: { id: campId }, select: { id: true } });
-		if (!camp) return NextResponse.json({ success: false, message: "Posko tidak ditemukan." }, { status: 404 });
+
+		await assertCampActive(campId);
+
 		if (userId) {
 			const head = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, division: true, campId: true } });
 			if (!head || head.role !== "DIVISION_HEAD" || head.division !== division || head.campId !== campId) {
@@ -25,11 +29,15 @@ export async function PUT(request: Request, { params }: Params) {
 		} else {
 			await prisma.campDivisionHead.deleteMany({ where: { campId, division } });
 		}
-		await prisma.auditLog.create({ data: { userId: admin.id, action: userId ? "ASSIGN_DIVISION_HEAD" : "UNASSIGN_DIVISION_HEAD", entity: "CampDivisionHead", entityId: campId, details: JSON.stringify({ division, userId }) } });
+		await writeAuditLog({ userId: admin.id, action: userId ? "ASSIGN_DIVISION_HEAD" : "UNASSIGN_DIVISION_HEAD", entity: "CampDivisionHead", entityId: campId, details: { division, userId } });
 		return NextResponse.json({ success: true, message: userId ? "Ketua divisi ditetapkan." : "Ketua divisi dilepas." });
 	} catch (error) {
+		if (isInvalidJson(error)) return invalidJsonResponse();
+		const knownCampError = campError(error);
+		if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
 		if (isAuthError(error)) return authError(error, "Hanya Super Admin yang dapat menetapkan ketua divisi.");
 		console.error("ASSIGN_DIVISION_HEAD_ERROR", error);
 		return NextResponse.json({ success: false, message: "Gagal menetapkan ketua divisi." }, { status: 500 });
 	}
 }
+

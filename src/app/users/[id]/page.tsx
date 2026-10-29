@@ -7,6 +7,7 @@ import { useSession } from "@/components/auth/user-provider";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface User {
 	id: string;
@@ -28,6 +29,8 @@ export default function UserDetailPage() {
 	const [user, setUser] = useState<User | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 
 	useEffect(() => {
 		if (!id) return;
@@ -44,7 +47,8 @@ export default function UserDetailPage() {
 
 	const handleDelete = async () => {
 		if (!user) return;
-		if (!confirm(`Hapus pengguna "${user.name}"?`)) return;
+		setDeleting(true);
+		setError("");
 
 		try {
 			const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
@@ -53,10 +57,14 @@ export default function UserDetailPage() {
 				router.push("/users");
 				router.refresh();
 			} else {
-				setError(data.message);
+				setError(data.message ?? "Gagal menghapus pengguna.");
+				setConfirmDelete(false);
 			}
 		} catch {
-			setError("Terjadi kesalahan");
+			setError("Terjadi kesalahan saat menghapus pengguna.");
+			setConfirmDelete(false);
+		} finally {
+			setDeleting(false);
 		}
 	};
 
@@ -70,7 +78,7 @@ export default function UserDetailPage() {
 		);
 	}
 
-	if (error) {
+	if (error && !user) {
 		return <div className="space-y-4"><Alert type="error">{error}</Alert><Link href="/users"><Button variant="secondary">Kembali ke Pengguna</Button></Link></div>;
 	}
 
@@ -86,11 +94,15 @@ export default function UserDetailPage() {
 					<Link href={`/users/${user.id}/edit`}>
 						<Button variant="secondary">Edit</Button>
 					</Link>
-					{currentUser?.role === "SUPER_ADMIN" && user.id !== currentUser.id && <Button variant="danger" onClick={handleDelete}>
-						Hapus
-					</Button>}
+					{currentUser?.role === "SUPER_ADMIN" && user.id !== currentUser.id && (
+						<Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={deleting}>
+							{deleting ? "Menghapus..." : "Hapus"}
+						</Button>
+					)}
 				</div>
 			</div>
+
+			{error && <Alert type="error">{error}</Alert>}
 
 			<div className="bg-white rounded-lg border shadow-sm p-6 space-y-4">
 				<div>
@@ -126,6 +138,17 @@ export default function UserDetailPage() {
 					</p>
 				</div>
 			</div>
+
+			<ConfirmDialog
+				isOpen={confirmDelete}
+				title="Hapus Pengguna"
+				message={`Apakah Anda yakin ingin menghapus akun "${user.name}"? Tindakan ini tidak dapat dibatalkan.`}
+				confirmLabel="Hapus Akun"
+				variant="danger"
+				busy={deleting}
+				onConfirm={handleDelete}
+				onClose={() => setConfirmDelete(false)}
+			/>
 		</div>
 	);
 }

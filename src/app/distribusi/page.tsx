@@ -5,6 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { ActionMenu, type ActionMenuItem } from "@/components/ui/action-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog, PromptDialog } from "@/components/ui/confirm-dialog";
 import { FormField } from "@/components/ui/form-field";
 import { Modal } from "@/components/ui/modal";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -15,18 +16,13 @@ import { useSession } from "@/components/auth/user-provider";
 	id: string;
 	campId: string;
 	itemName: string;
-	quantity: number;
-	reservedQuantity: number;
-	damagedQuantity: number;
+	availableQuantity: number;
+	availableBaseQuantity: number;
 	unit: string;
 	baseUnit: string;
 	unitDimension: "COUNT" | "MASS" | "VOLUME";
 	conversionFactor: number;
 	conversionStatus: "CONFIGURED" | "NEEDS_REVIEW";
-	quantityBase: number;
-	reservedQuantityBase: number;
-	damagedQuantityBase: number;
-	status: string;
  };
  type Request = {
 	id: string;
@@ -83,11 +79,33 @@ function dateLabel(value: string | null) {
 }
 
 function availableQuantity(stock: Stock) {
-	return Math.max(stock.quantity - stock.reservedQuantity, 0);
+	return stock.availableQuantity;
 }
 
 function availableBaseQuantity(stock: Stock) {
-	return Math.max(stock.quantityBase - stock.reservedQuantityBase, 0);
+	return stock.availableBaseQuantity;
+}
+
+const RECEIPT_PROOF_MAX_BYTES = 3 * 1024 * 1024;
+const RECEIPT_PROOF_MAX_DIMENSION = 1600;
+
+// Kecilkan foto di browser agar body upload aman di bawah limit 4.5 MB Vercel.
+async function compressProof(file: File): Promise<File> {
+	if (file.size <= 1024 * 1024 || typeof createImageBitmap !== "function") return file;
+	try {
+		const bitmap = await createImageBitmap(file);
+		const scale = Math.min(1, RECEIPT_PROOF_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+		const canvas = document.createElement("canvas");
+		canvas.width = Math.round(bitmap.width * scale);
+		canvas.height = Math.round(bitmap.height * scale);
+		canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+		bitmap.close();
+		const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+		if (!blob || blob.size >= file.size) return file;
+		return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+	} catch {
+		return file;
+	}
 }
 
 function standardUnitFactor(unit: string) {
@@ -163,6 +181,22 @@ export default function DistributionPage() {
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState("");
 	const [message, setMessage] = useState("");
+	const [confirmAction, setConfirmAction] = useState<{
+		title: string;
+		message: string;
+		confirmLabel?: string;
+		variant?: "primary" | "danger";
+		onConfirm: () => void | Promise<void>;
+	} | null>(null);
+	const [promptAction, setPromptAction] = useState<{
+		title: string;
+		message: string;
+		inputLabel: string;
+		placeholder?: string;
+		confirmLabel?: string;
+		variant?: "primary" | "danger";
+		onConfirm: (val: string) => void | Promise<void>;
+	} | null>(null);
 
 	const loadData = useCallback(async () => {
 		setLoading(true);
@@ -192,13 +226,13 @@ export default function DistributionPage() {
 
 	const sourceOptions = useMemo(() => camps.filter((camp) => camp.status === "ACTIVE" && camp.id !== (user?.role === "SUPER_ADMIN" ? form.destinationCampId : user?.campId)).map((camp) => ({ value: camp.id, label: camp.name })), [camps, form.destinationCampId, user?.campId, user?.role]);
 	const destinationOptions = useMemo(() => camps.filter((camp) => camp.status === "ACTIVE" && camp.id !== form.sourceCampId).map((camp) => ({ value: camp.id, label: camp.name })), [camps, form.sourceCampId]);
-	const sourceStocks = useMemo(() => stocks.filter((stock) => stock.campId === form.sourceCampId && stock.status !== "SPOILED_OR_DAMAGED" && stock.damagedQuantity === 0 && stock.damagedQuantityBase === 0 && availableBaseQuantity(stock) > 0), [form.sourceCampId, stocks]);
+	const sourceStocks = useMemo(() => stocks.filter((stock) => stock.campId === form.sourceCampId && availableBaseQuantity(stock) > 0), [form.sourceCampId, stocks]);
 	const selectedStock = sourceStocks.find((stock) => stock.id === form.sourceItemId);
 	const selectedMax = maxRequestedQuantity(selectedStock, form.requestedUnit);
 	const preview = conversionPreview(selectedStock, form.quantity, form.requestedUnit);
 	const approvalStocks = useMemo(() => {
 		if (!approval) return [];
-		return stocks.filter((stock) => stock.campId === approval.sourceCampId && stock.itemName.toLowerCase() === approval.itemName.toLowerCase() && stock.unit.toLowerCase() === approval.unit.toLowerCase() && stock.status !== "SPOILED_OR_DAMAGED" && stock.damagedQuantity === 0 && stock.damagedQuantityBase === 0 && availableBaseQuantity(stock) > 0);
+		return stocks.filter((stock) => stock.campId === approval.sourceCampId && stock.itemName.toLowerCase() === approval.itemName.toLowerCase() && stock.unit.toLowerCase() === approval.unit.toLowerCase() && availableBaseQuantity(stock) > 0);
 	}, [approval, stocks]);
 	const approvalStock = approvalStocks.find((stock) => stock.id === approvalStockId);
 
@@ -259,9 +293,11 @@ export default function DistributionPage() {
 		setError("");
 		setMessage("");
 		try {
+			const proof = await compressProof(receiptProof);
+			if (proof.size > RECEIPT_PROOF_MAX_BYTES) throw new Error("Ukuran foto bukti maksimal 3 MB.");
 			const payload = new FormData();
 			payload.append("action", "RECEIVE");
-			payload.append("proof", receiptProof);
+			payload.append("proof", proof);
 			const res = await fetch(`/api/distribution/${receiptDistribution.id}`, { method: "PUT", body: payload });
 			const data = await res.json();
 			if (!res.ok || !data.success) throw new Error(data.message);
@@ -302,12 +338,47 @@ export default function DistributionPage() {
 				<div className="flex justify-end"><Button onClick={() => void submitRequest()} disabled={submitting || !destinationCamp || !form.sourceCampId || !form.sourceItemId || !form.quantity || !form.requestedUnit || Boolean(selectedStock && Number(form.quantity) > selectedMax)}>{submitting ? "Menyimpan..." : "Buat Permintaan"}</Button></div>
 			</div>}
 
-			<div className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Permintaan Logistik</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Data permintaan distribusi" tabIndex={0}><table className="min-w-[52rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Rute", "Jumlah", "Status", "Aksi"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{requests.map((item) => { const canReview = user?.role === "SUPER_ADMIN"; return <tr key={item.id}><td className="px-5 py-4 text-sm"><p className="font-medium text-gray-900">{item.itemName}</p><p className="text-gray-500">{item.notes || "Tanpa catatan"}</p></td><td className="px-5 py-4 text-sm text-gray-600">{item.sourceCamp.name} → {item.destinationCamp.name}</td><td className="px-5 py-4 text-sm text-gray-600">{item.requestedQuantity && item.requestedUnit ? `${item.requestedQuantity} ${item.requestedUnit}` : `${item.quantity} ${item.unit}`}<span className="block text-xs text-slate-400">{item.baseQuantity && item.baseUnit ? `Saldo dasar: ${item.baseQuantity} ${item.baseUnit}` : ""}</span></td><td className="px-5 py-4"><Badge label={item.status} />{item.rejectionReason && <p className="mt-1 max-w-48 text-xs text-red-600">{item.rejectionReason}</p>}</td><td className="px-5 py-4">{item.status === "PENDING" && canReview ? <ActionMenu label={`permintaan ${item.itemName}`} items={[{ label: "Setujui & reservasi", onSelect: () => { setApproval(item); setApprovalQuantity(String(item.quantity)); setApprovalStockId(""); } }, { label: "Tolak", danger: true, onSelect: () => { const reason = window.prompt("Alasan penolakan:"); if (reason) void updateRequest(item.id, { action: "REJECT", rejectionReason: reason }); } }]} /> : item.distribution ? <span className="text-xs text-gray-500">Stok diproses</span> : <span className="text-xs text-gray-400">-</span>}</td></tr>; })}{requests.length === 0 && <tr><td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-500">Belum ada permintaan distribusi.</td></tr>}</tbody></table></div></div>
+			<div className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Permintaan Logistik</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Data permintaan distribusi" tabIndex={0}><table className="min-w-[52rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Rute", "Jumlah", "Status", "Aksi"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{requests.map((item) => { const canReview = user?.role === "SUPER_ADMIN"; const canWithdraw = canReview || item.createdBy.id === user?.id || (user?.role === "MANAGER" && user.campId === item.destinationCampId); const requestActions: ActionMenuItem[] = []; if (item.status === "PENDING" && canReview) requestActions.push({ label: "Setujui & reservasi", onSelect: () => { setApproval(item); setApprovalQuantity(String(item.quantity)); setApprovalStockId(""); } }, { label: "Tolak", danger: true, onSelect: () => { setPromptAction({ title: "Tolak Permintaan Logistik", message: `Tolak permintaan untuk barang "${item.itemName}"? Masukkan alasan penolakan.`, inputLabel: "Alasan penolakan", placeholder: "Contoh: Stok dialokasikan untuk kebutuhan mendesak", confirmLabel: "Tolak Permintaan", variant: "danger", onConfirm: (reason) => updateRequest(item.id, { action: "REJECT", rejectionReason: reason }) }); } }); if (item.status === "PENDING" && canWithdraw) requestActions.push({ label: "Tarik permintaan", danger: true, onSelect: () => { setConfirmAction({ title: "Tarik Permintaan Logistik", message: `Apakah Anda yakin ingin menarik permintaan "${item.itemName}"?`, confirmLabel: "Tarik Permintaan", variant: "danger", onConfirm: () => updateRequest(item.id, { action: "WITHDRAW" }) }); } }); return <tr key={item.id}><td className="px-5 py-4 text-sm"><p className="font-medium text-gray-900">{item.itemName}</p><p className="text-gray-500">{item.notes || "Tanpa catatan"}</p></td><td className="px-5 py-4 text-sm text-gray-600">{item.sourceCamp.name} → {item.destinationCamp.name}</td><td className="px-5 py-4 text-sm text-gray-600">{item.requestedQuantity && item.requestedUnit ? `${item.requestedQuantity} ${item.requestedUnit}` : `${item.quantity} ${item.unit}`}<span className="block text-xs text-slate-400">{item.baseQuantity && item.baseUnit ? `Saldo dasar: ${item.baseQuantity} ${item.baseUnit}` : ""}</span></td><td className="px-5 py-4"><Badge label={item.status} />{item.rejectionReason && <p className="mt-1 max-w-48 text-xs text-red-600">{item.rejectionReason}</p>}</td><td className="px-5 py-4">{requestActions.length ? <ActionMenu label={`permintaan ${item.itemName}`} items={requestActions} disabled={submitting} /> : item.distribution ? <span className="text-xs text-gray-500">Stok diproses</span> : <span className="text-xs text-gray-400">-</span>}</td></tr>; })}{requests.length === 0 && <tr><td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-500">Belum ada permintaan distribusi.</td></tr>}</tbody></table></div></div>
 
-			<div className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Riwayat Distribusi</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Riwayat distribusi" tabIndex={0}><table className="min-w-[52rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Rute", "Jumlah", "Status", "Waktu", "Aksi"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{distributions.map((item) => { const canShip = user?.role === "SUPER_ADMIN" || (user?.role === "MANAGER" && user.campId === item.sourceCamp.id) || (user?.division === "LOGISTICS" && user.campId === item.sourceCamp.id); const canReceive = user?.role === "SUPER_ADMIN" || (user?.role === "MANAGER" && user.campId === item.destinationCamp.id) || (user?.division === "LOGISTICS" && user.campId === item.destinationCamp.id); const actions: ActionMenuItem[] = []; if (item.status === "RESERVED" && canShip) actions.push({ label: "Kirim", onSelect: () => void updateRequest(item.id, { action: "SHIP" }) }); if (item.status === "SHIPPED" && canReceive) actions.push({ label: "Terima dengan bukti", onSelect: () => { setReceiptDistribution(item); setReceiptProof(null); setError(""); } }); if (item.status === "RESERVED" && canShip) actions.push({ label: "Batalkan", danger: true, onSelect: () => void updateRequest(item.id, { action: "CANCEL" }) }); return <tr key={item.id}><td className="px-5 py-4 text-sm font-medium text-gray-900">{item.itemName}</td><td className="px-5 py-4 text-sm text-gray-600">{item.sourceCamp.name} → {item.destinationCamp.name}</td><td className="px-5 py-4 text-sm text-gray-600">{item.requestedQuantity && item.requestedUnit ? `${item.requestedQuantity} ${item.requestedUnit}` : `${item.quantity} ${item.unit}`}<span className="block text-xs text-slate-400">{item.baseQuantity && item.baseUnit ? `Saldo dasar: ${item.baseQuantity} ${item.baseUnit}` : ""}</span></td><td className="px-5 py-4"><Badge label={item.status} /></td><td className="px-5 py-4 text-xs text-gray-500">Dikirim: {dateLabel(item.shippedAt)}<br />Diterima: {dateLabel(item.receivedAt)}{item.receiptProofAvailable && <><br /><a href={`/api/distribution/${item.id}/proof`} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">Lihat bukti foto{item.receiptProofMimeType ? ` · ${item.receiptProofMimeType.replace("image/", "")}` : ""}</a></>}</td><td className="px-5 py-4">{actions.length ? <ActionMenu label={`distribusi ${item.itemName}`} items={actions} disabled={submitting} /> : <span className="text-xs text-gray-400">-</span>}</td></tr>; })}{distributions.length === 0 && <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-gray-500">Belum ada distribusi berjalan.</td></tr>}</tbody></table></div></div>
+			<div className="rounded-lg border bg-white shadow-sm"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Riwayat Distribusi</h2></div><div className="min-w-0 overflow-x-auto" role="region" aria-label="Riwayat distribusi" tabIndex={0}><table className="min-w-[52rem] divide-y divide-gray-200"><thead className="bg-gray-50"><tr>{["Barang", "Rute", "Jumlah", "Status", "Waktu", "Aksi"].map((header) => <th key={header} className="px-5 py-3 text-left text-xs font-medium uppercase text-gray-500">{header}</th>)}</tr></thead><tbody className="divide-y divide-gray-100">{distributions.map((item) => { const canShip = user?.role === "SUPER_ADMIN" || (user?.role === "MANAGER" && user.campId === item.sourceCamp.id) || (user?.division === "LOGISTICS" && user.campId === item.sourceCamp.id); const canReceive = user?.role === "SUPER_ADMIN" || (user?.role === "MANAGER" && user.campId === item.destinationCamp.id) || (user?.division === "LOGISTICS" && user.campId === item.destinationCamp.id); const actions: ActionMenuItem[] = []; if (item.status === "RESERVED" && canShip) actions.push({ label: "Kirim", onSelect: () => setConfirmAction({ title: "Konfirmasi Pengiriman", message: `Kirim barang "${item.itemName}" dari ${item.sourceCamp.name} ke ${item.destinationCamp.name}?`, confirmLabel: "Kirim Sekarang", onConfirm: () => updateRequest(item.id, { action: "SHIP" }) }) }); if (item.status === "SHIPPED" && canReceive) actions.push({ label: "Terima dengan bukti", onSelect: () => { setReceiptDistribution(item); setReceiptProof(null); setError(""); } }); if (item.status === "RESERVED" && canShip) actions.push({ label: "Batalkan", danger: true, onSelect: () => setConfirmAction({ title: "Batalkan Distribusi", message: `Batalkan distribusi "${item.itemName}"? Stok yang dicadangkan akan dikembalikan ke saldo posko asal.`, confirmLabel: "Batalkan Distribusi", variant: "danger", onConfirm: () => updateRequest(item.id, { action: "CANCEL" }) }) }); return <tr key={item.id}><td className="px-5 py-4 text-sm font-medium text-gray-900">{item.itemName}</td><td className="px-5 py-4 text-sm text-gray-600">{item.sourceCamp.name} → {item.destinationCamp.name}</td><td className="px-5 py-4 text-sm text-gray-600">{item.requestedQuantity && item.requestedUnit ? `${item.requestedQuantity} ${item.requestedUnit}` : `${item.quantity} ${item.unit}`}<span className="block text-xs text-slate-400">{item.baseQuantity && item.baseUnit ? `Saldo dasar: ${item.baseQuantity} ${item.baseUnit}` : ""}</span></td><td className="px-5 py-4"><Badge label={item.status} /></td><td className="px-5 py-4 text-xs text-gray-500">Dikirim: {dateLabel(item.shippedAt)}<br />Diterima: {dateLabel(item.receivedAt)}{item.receiptProofAvailable && <><br /><a href={`/api/distribution/${item.id}/proof`} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:underline">Lihat bukti foto{item.receiptProofMimeType ? ` · ${item.receiptProofMimeType.replace("image/", "")}` : ""}</a></>}</td><td className="px-5 py-4">{actions.length ? <ActionMenu label={`distribusi ${item.itemName}`} items={actions} disabled={submitting} /> : <span className="text-xs text-gray-400">-</span>}</td></tr>; })}{distributions.length === 0 && <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-gray-500">Belum ada distribusi berjalan.</td></tr>}</tbody></table></div></div>
 
-			<Modal isOpen={Boolean(receiptDistribution)} onClose={() => !submitting && setReceiptDistribution(null)} title="Konfirmasi penerimaan barang">{receiptDistribution && <form onSubmit={(event) => { event.preventDefault(); void submitReceive(); }} className="space-y-4"><p className="text-sm text-gray-600">Manager posko tujuan wajib mengunggah foto sebagai bukti barang diterima.</p><div><label htmlFor="receipt-proof" className="mb-1.5 block text-sm font-medium text-slate-700">Bukti foto penerimaan <span className="text-rose-500">*</span></label><input id="receipt-proof" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setReceiptProof(event.target.files?.[0] ?? null)} required className="block w-full rounded-xl border border-slate-200 bg-white p-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-blue-700" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, atau WebP. Maksimal 5 MB.</p>{receiptProof && <p className="mt-1 text-xs font-medium text-emerald-600">Dipilih: {receiptProof.name}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setReceiptDistribution(null)} disabled={submitting}>Batal</Button><Button type="submit" disabled={submitting || !receiptProof}>{submitting ? "Menyimpan..." : "Konfirmasi diterima"}</Button></div></form>}</Modal>
+			<Modal isOpen={Boolean(receiptDistribution)} onClose={() => !submitting && setReceiptDistribution(null)} title="Konfirmasi penerimaan barang">{receiptDistribution && <form onSubmit={(event) => { event.preventDefault(); void submitReceive(); }} className="space-y-4"><p className="text-sm text-gray-600">Manager posko tujuan wajib mengunggah foto sebagai bukti barang diterima.</p><div><label htmlFor="receipt-proof" className="mb-1.5 block text-sm font-medium text-slate-700">Bukti foto penerimaan <span className="text-rose-500">*</span></label><input id="receipt-proof" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setReceiptProof(event.target.files?.[0] ?? null)} required className="block w-full rounded-xl border border-slate-200 bg-white p-2 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-blue-700" /><p className="mt-1 text-xs text-slate-500">JPG, PNG, atau WebP. Foto besar dikompres otomatis; maksimal 3 MB.</p>{receiptProof && <p className="mt-1 text-xs font-medium text-emerald-600">Dipilih: {receiptProof.name}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setReceiptDistribution(null)} disabled={submitting}>Batal</Button><Button type="submit" disabled={submitting || !receiptProof}>{submitting ? "Menyimpan..." : "Konfirmasi diterima"}</Button></div></form>}</Modal>
 			<Modal isOpen={Boolean(approval)} onClose={() => !submitting && setApproval(null)} title="Setujui Permintaan">{approval && <div className="space-y-4"><p className="text-sm text-gray-600">Pilih stok sumber untuk {approval.itemName} dari {approval.sourceCamp.name}. Permintaan: {approval.requestedQuantity ?? approval.quantity} {approval.requestedUnit ?? approval.unit}.</p><SearchableSelect label="Stok sumber" value={approvalStockId} onChange={(value) => { setApprovalStockId(value); setApprovalQuantity(""); }} options={approvalStocks.map((stock) => ({ value: stock.id, label: stock.itemName, meta: `Tersedia ${availableQuantity(stock)} ${stock.unit} · ${availableBaseQuantity(stock)} ${stock.baseUnit}` }))} placeholder="Pilih stok yang cocok" emptyMessage="Tidak ada saldo stok yang cukup." /><FormField label="Jumlah disetujui dalam unit stok" type="number" value={approvalQuantity} onChange={setApprovalQuantity} min={1} max={approvalStock ? availableQuantity(approvalStock) : undefined} required /><p className="text-xs text-slate-500">Maksimal: {approvalStock ? quantityLabel(availableQuantity(approvalStock), approvalStock.unit, availableBaseQuantity(approvalStock), approvalStock.baseUnit) : "pilih stok"}</p><div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setApproval(null)} disabled={submitting}>Batal</Button><Button disabled={submitting || !approvalStockId || !approvalQuantity || Boolean(approvalStock && Number(approvalQuantity) > availableQuantity(approvalStock))} onClick={() => void updateRequest(approval.id, { action: "APPROVE", sourceItemId: approvalStockId, quantity: Number(approvalQuantity) })}>Setujui</Button></div></div>}</Modal>
+			{confirmAction && (
+				<ConfirmDialog
+					isOpen={Boolean(confirmAction)}
+					title={confirmAction.title}
+					message={confirmAction.message}
+					confirmLabel={confirmAction.confirmLabel}
+					variant={confirmAction.variant}
+					busy={submitting}
+					onConfirm={async () => {
+						const action = confirmAction.onConfirm;
+						await action();
+						setConfirmAction(null);
+					}}
+					onClose={() => setConfirmAction(null)}
+				/>
+			)}
+			{promptAction && (
+				<PromptDialog
+					isOpen={Boolean(promptAction)}
+					title={promptAction.title}
+					message={promptAction.message}
+					inputLabel={promptAction.inputLabel}
+					placeholder={promptAction.placeholder}
+					confirmLabel={promptAction.confirmLabel}
+					variant={promptAction.variant}
+					busy={submitting}
+					required
+					onConfirm={async (val) => {
+						const action = promptAction.onConfirm;
+						await action(val);
+						setPromptAction(null);
+					}}
+					onClose={() => setPromptAction(null)}
+				/>
+			)}
 		</div>
 	);
 }

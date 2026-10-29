@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { authError, getAccessibleCampWhere, isAuthError, requireRole } from "@/lib/auth/guard";
 import { writeReportToGoogleSheet, type ReportSheetRow } from "@/lib/google-sheets";
+import { writeAuditLog } from "@/lib/audit";
 
 function parseDate(value: string | null, endOfDay = false) {
 	if (!value) return null;
@@ -11,7 +12,7 @@ function parseDate(value: string | null, endOfDay = false) {
 
 export async function POST(request: Request) {
 	try {
-		const user = await requireAuth();
+		const user = await requireRole("SUPER_ADMIN", "MANAGER");
 		const body = await request.json() as Record<string, unknown>;
 		const fromValue = typeof body.from === "string" ? body.from : null;
 		const toValue = typeof body.to === "string" ? body.to : null;
@@ -99,9 +100,10 @@ export async function POST(request: Request) {
 			`LAPORAN SIAGA BENCANA | ${fromValue} - ${toValue}`,
 			{ sectionRows, headerRows, columnCount: 10 },
 		);
+		await writeAuditLog({ userId: user.id, action: "EXPORT", entity: "Report", details: { target: "GOOGLE_SHEETS", from: fromValue, to: toValue } });
 		return NextResponse.json({ success: true, message: "Laporan berhasil dikirim ke Google Sheets.", data: result });
 	} catch (error) {
-		if (isAuthError(error)) return authError(error);
+		if (isAuthError(error)) return authError(error, "Hanya Super Admin atau Manager yang dapat mengekspor laporan.");
 
 		console.error("EXPORT_REPORT_SHEETS_ERROR", error);
 		return NextResponse.json(

@@ -53,14 +53,15 @@ export const NAV_SECTIONS: NavSection[] = [
 		id: "OPERASIONAL",
 		label: "Operasional",
 		items: [
-			{ href: "/kelola-posko", label: "Kelola Posko" },
-			{ href: "/logistik", label: "Logistik" },
-			{ href: "/shelter", label: "Shelter" },
-			{ href: "/pengungsi", label: "Pengungsi" },
+			{ href: "/kelola-posko", label: "Kelola Posko", roles: ["SUPER_ADMIN", "MANAGER"] },
+			{ href: "/logistik", label: "Logistik", divisions: ["LOGISTICS"] },
+			{ href: "/shelter", label: "Shelter", divisions: ["SHELTER"] },
+			{ href: "/pengungsi", label: "Pengungsi", divisions: ["DATA_REGISTRATION"] },
 			{
 				href: "/distribusi",
 				label: "Distribusi",
 				roles: ["SUPER_ADMIN", "MANAGER", "DIVISION_HEAD", "FIELD_OFFICER"],
+				divisions: ["LOGISTICS"],
 			},
 		],
 	},
@@ -108,12 +109,11 @@ export function isItemVisible(item: NavItem, user: SessionUser | null) {
 		return false;
 	}
 
-	if (
-		item.divisions &&
-		user?.role !== "SUPER_ADMIN" &&
-		(!user?.division || !item.divisions.includes(user.division))
-	) {
-		return false;
+	// Selaras dengan canManageDivision: Super Admin & Manager tanpa divisi melihat semua divisi.
+	if (item.divisions) {
+		if (!user) return false;
+		const bypass = user.role === "SUPER_ADMIN" || (user.role === "MANAGER" && !user.division);
+		if (!bypass && (!user.division || !item.divisions.includes(user.division))) return false;
 	}
 
 	return true;
@@ -150,6 +150,13 @@ export function canAccessPath(pathname: string, user: SessionUser | null) {
 	}
 
 	return true;
+}
+
+// Hanya path internal: "/x" boleh, "//evil.com" atau "/\evil.com" (protocol-relative) ditolak.
+export function safeReturnTo(value: string | null | undefined, fallback = "/dashboard") {
+	if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return fallback;
+	if (/[\u0000-\u001f]/.test(value)) return fallback;
+	return value;
 }
 
 export function getBreadcrumb(pathname: string) {

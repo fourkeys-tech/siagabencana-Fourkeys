@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { writeAuditLog } from "@/lib/audit";
+import { isSerializationConflict, SERIALIZATION_CONFLICT_MESSAGE } from "@/lib/prisma-errors";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH, parseBoolean, validateOptionalText, validateText } from "@/lib/validation";
 
 type Params = {
     params: Promise<{ id: string }>;
@@ -21,6 +25,7 @@ export async function GET(
                     select: {
                         id: true,
                         name: true,
+                        status: true,
                     },
                 },
             },
@@ -90,7 +95,28 @@ export async function PUT(
             );
         }
 
-        const body = await request.json() as Record<string, unknown>;
+        const body = await readJson(request);
+
+        if (body.name !== undefined) {
+            const nameError = validateText(body.name, "Nama pengungsi", MAX_NAME_LENGTH);
+            if (nameError) return NextResponse.json({ success: false, message: nameError }, { status: 400 });
+        }
+
+        const notesError = validateOptionalText(body.notes, "Catatan", MAX_NOTE_LENGTH);
+        if (notesError) return NextResponse.json({ success: false, message: notesError }, { status: 400 });
+
+        // totalFamily memengaruhi okupansi posko; perubahan harus lewat check-out + registrasi ulang.
+        if (body.totalFamily !== undefined && Number(body.totalFamily) !== existing.totalFamily) {
+            return NextResponse.json({ success: false, message: "Jumlah anggota keluarga tidak dapat diubah langsung. Lakukan check-out lalu registrasi ulang." }, { status: 400 });
+        }
+
+        let parsedSpecialNeeds: boolean | undefined;
+        if (body.hasSpecialNeeds !== undefined) {
+            parsedSpecialNeeds = parseBoolean(body.hasSpecialNeeds);
+            if (parsedSpecialNeeds === undefined) {
+                return NextResponse.json({ success: false, message: "Pilihan kebutuhan khusus tidak valid." }, { status: 400 });
+            }
+        }
 
         const updated = await prisma.evacueeRecord.update({
             where: { id },
@@ -98,8 +124,8 @@ export async function PUT(
                 ...(body.name !== undefined && {
                     name: String(body.name).trim(),
                 }),
-                ...(body.hasSpecialNeeds !== undefined && {
-                    hasSpecialNeeds: Boolean(body.hasSpecialNeeds),
+                ...(parsedSpecialNeeds !== undefined && {
+                    hasSpecialNeeds: parsedSpecialNeeds,
                 }),
                 ...(body.notes !== undefined && {
                     notes: body.notes
@@ -109,12 +135,15 @@ export async function PUT(
             },
         });
 
+        await writeAuditLog({ userId: user.id, action: "UPDATE", entity: "EvacueeRecord", entityId: id, details: { campId: existing.campId, hasSpecialNeeds: updated.hasSpecialNeeds } });
+
         return NextResponse.json({
             success: true,
             message: "Data pengungsi berhasil diperbarui.",
             data: updated,
         });
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
         if (isAuthError(error)) {
             return authError(error);
         }
@@ -157,8 +186,20 @@ export async function DELETE(
             );
         }
 
+        let wasActive = false;
+
+        // Atomic: cegah race condition dengan checkout paralel.
+        // Hapus hanya yang belum checkout (departedAt: null) terlebih dahulu.
+        // Jika cocok 1 baris, posko dikurangi okupansinya.
+        // Jika 0, coba hapus yang sudah checkout (tanpa mengurangi okupansi).
+        // Jika keduanya 0, record sudah dihapus transaksi lain → 404.
         await prisma.$transaction(async (tx) => {
-            if (!existing.departedAt) {
+            const activeDeleted = await tx.evacueeRecord.deleteMany({
+                where: { id, departedAt: null },
+            });
+
+            if (activeDeleted.count === 1) {
+                wasActive = true;
                 const camp = await tx.camp.findUnique({
                     where: { id: existing.campId },
                     select: { currentOccupants: true },
@@ -176,18 +217,26 @@ export async function DELETE(
                         },
                     },
                 });
+                return;
             }
 
-            await tx.evacueeRecord.delete({
+            const departedDeleted = await tx.evacueeRecord.deleteMany({
                 where: { id },
             });
+            if (departedDeleted.count !== 1) throw new Error("EVACUEE_NOT_FOUND");
         });
+
+        await writeAuditLog({ userId: user.id, action: "DELETE", entity: "EvacueeRecord", entityId: id, details: { campId: existing.campId, totalFamily: existing.totalFamily, wasActive } });
 
         return NextResponse.json({
             success: true,
             message: "Data pengungsi berhasil dihapus.",
         });
     } catch (error) {
+        if (isSerializationConflict(error)) return NextResponse.json({ success: false, message: SERIALIZATION_CONFLICT_MESSAGE }, { status: 409 });
+        if (error instanceof Error && error.message === "EVACUEE_NOT_FOUND") {
+            return NextResponse.json({ success: false, message: "Data pengungsi tidak ditemukan." }, { status: 404 });
+        }
         if (error instanceof Error && error.message === "INVALID_CAMP_OCCUPANCY") {
             return NextResponse.json(
                 { success: false, message: "Jumlah pengungsi saat ini di posko tidak mencukupi untuk penghapusan ini." },

@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { writeAuditLog } from "@/lib/audit";
+import { assertCampActive, campError } from "@/lib/camps";
+import { refreshOperationalStatus, runSerializable } from "@/lib/inventory";
+import { isForeignKeyError, isSerializationConflict, SERIALIZATION_CONFLICT_MESSAGE } from "@/lib/prisma-errors";
+import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH, validateOptionalText, validateText } from "@/lib/validation";
 import { assertUnitDefinition, convertToBase, defaultUnitDefinition, inferDimension, inferBaseUnit, normalizeUnit, type UnitConversionStatus, type UnitDimension } from "@/lib/unit-conversion";
 
 type Params = {
@@ -10,6 +16,7 @@ type Params = {
 async function getItem(id: string) {
     return prisma.logisticsItem.findUnique({
         where: { id },
+        include: { camp: { select: { id: true, name: true, status: true } } },
     });
 }
 
@@ -79,7 +86,9 @@ export async function PUT(
             );
         }
 
-        const body = await request.json() as Record<string, unknown>;
+        await assertCampActive(item.campId);
+
+        const body = await readJson(request);
         const forbiddenFields = ["quantity", "status", "reservedQuantity", "damagedQuantity", "quantityBase", "reservedQuantityBase", "damagedQuantityBase"];
         if (forbiddenFields.some((field) => body[field] !== undefined)) {
             return NextResponse.json(
@@ -87,6 +96,17 @@ export async function PUT(
                 { status: 400 },
             );
         }
+
+        if (body.itemName !== undefined) {
+            const nameError = validateText(body.itemName, "Nama barang", MAX_NAME_LENGTH);
+            if (nameError) return NextResponse.json({ success: false, message: nameError }, { status: 400 });
+        }
+
+        const notesError = validateOptionalText(body.notes, "Catatan", MAX_NOTE_LENGTH);
+        if (notesError) return NextResponse.json({ success: false, message: notesError }, { status: 400 });
+
+        const conversionNoteError = validateOptionalText(body.conversionNote, "Catatan konversi", MAX_NOTE_LENGTH);
+        if (conversionNoteError) return NextResponse.json({ success: false, message: conversionNoteError }, { status: 400 });
 
         const hasUnitChange = ["unit", "baseUnit", "unitDimension", "conversionFactor", "conversionStatus"].some((field) => body[field] !== undefined);
         const minimumQuantity = body.minimumQuantity === undefined ? item.minimumQuantity : Number(body.minimumQuantity);
@@ -117,26 +137,35 @@ export async function PUT(
         if (definitionChanged && (item.quantity > 0 || item.reservedQuantity > 0 || item.damagedQuantity > 0 || item.quantityBase > 0 || item.reservedQuantityBase > 0 || item.damagedQuantityBase > 0)) {
             return NextResponse.json({ success: false, message: "Definisi unit tidak dapat diubah saat stok, reservasi, atau stok rusak masih tercatat. Gunakan alur rekonsiliasi inventory." }, { status: 409 });
         }
-        const updated = await prisma.$transaction(async (tx) => tx.logisticsItem.update({
-            where: { id },
-            data: {
-                ...(body.itemName !== undefined && { itemName: String(body.itemName).trim() }),
-                ...(body.unit !== undefined && { unit: unitDefinition.unit }),
-                ...(definitionChanged && {
-                    baseUnit: unitDefinition.baseUnit,
-                    unitDimension: unitDefinition.unitDimension,
-                    conversionFactor: unitDefinition.conversionFactor,
-                    conversionStatus: unitDefinition.conversionStatus,
-                    quantityBase: item.quantity * unitDefinition.conversionFactor,
-                    reservedQuantityBase: item.reservedQuantity * unitDefinition.conversionFactor,
-                    damagedQuantityBase: item.damagedQuantity * unitDefinition.conversionFactor,
-                }),
-                ...(body.conversionNote !== undefined && { conversionNote: String(body.conversionNote ?? "").trim() || null }),
-                minimumQuantity,
-                minimumQuantityBase,
-                ...(body.notes !== undefined && { notes: body.notes ? String(body.notes).trim() : null }),
-            },
-        }));
+
+        // Perbarui item lalu refresh status operasional dalam satu transaksi Serializable
+        // agar status (CRITICAL/LOW/SUFFICIENT) langsung sinkron dengan batas minimum baru.
+        const updated = await runSerializable(async (tx) => {
+            const res = await tx.logisticsItem.update({
+                where: { id },
+                data: {
+                    ...(body.itemName !== undefined && { itemName: String(body.itemName).trim() }),
+                    ...(body.unit !== undefined && { unit: unitDefinition.unit }),
+                    ...(definitionChanged && {
+                        baseUnit: unitDefinition.baseUnit,
+                        unitDimension: unitDefinition.unitDimension,
+                        conversionFactor: unitDefinition.conversionFactor,
+                        conversionStatus: unitDefinition.conversionStatus,
+                        quantityBase: item.quantity * unitDefinition.conversionFactor,
+                        reservedQuantityBase: item.reservedQuantity * unitDefinition.conversionFactor,
+                        damagedQuantityBase: item.damagedQuantity * unitDefinition.conversionFactor,
+                    }),
+                    ...(body.conversionNote !== undefined && { conversionNote: String(body.conversionNote ?? "").trim() || null }),
+                    minimumQuantity,
+                    minimumQuantityBase,
+                    ...(body.notes !== undefined && { notes: body.notes ? String(body.notes).trim() : null }),
+                },
+            });
+            await refreshOperationalStatus(tx, id);
+            return tx.logisticsItem.findUniqueOrThrow({ where: { id } });
+        });
+
+        await writeAuditLog({ userId: user.id, action: "UPDATE", entity: "LogisticsItem", entityId: id, details: { itemName: updated.itemName, unit: updated.unit, minimumQuantity } });
 
         return NextResponse.json({
             success: true,
@@ -144,6 +173,11 @@ export async function PUT(
             data: updated,
         });
     } catch (error) {
+        if (isInvalidJson(error)) return invalidJsonResponse();
+        if (isSerializationConflict(error)) return NextResponse.json({ success: false, message: SERIALIZATION_CONFLICT_MESSAGE }, { status: 409 });
+        const knownCampError = campError(error);
+        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
+
         if (error instanceof Error && error.message === "INVALID_QUANTITY") {
             return NextResponse.json({ success: false, message: "Jumlah harus bilangan bulat lebih dari 0." }, { status: 400 });
         }
@@ -165,6 +199,8 @@ export async function PUT(
                 CONVERSION_DEFINITION_REQUIRED: "Definisi konversi wajib diisi untuk unit berbeda.",
                 CONVERSION_REQUIRED: "Definisi isi kemasan belum lengkap.",
                 CONVERSION_OVERFLOW: "Hasil konversi terlalu besar.",
+                CAMP_NOT_ACTIVE: "Posko sudah ditutup sehingga tidak dapat memperbarui logistik.",
+                P2034_EXHAUSTED: SERIALIZATION_CONFLICT_MESSAGE,
             };
             if (unitMessages[error.message]) return NextResponse.json({ success: false, message: unitMessages[error.message] }, { status: 400 });
         }
@@ -205,9 +241,26 @@ export async function DELETE(
             );
         }
 
+        // Item ber-reservasi atau punya riwayat mutasi tidak boleh hilang dari jejak stok.
+        if (item.reservedQuantity > 0 || item.reservedQuantityBase > 0) {
+            return NextResponse.json(
+                { success: false, message: "Item masih dicadangkan untuk distribusi. Batalkan atau kirim distribusi terlebih dahulu." },
+                { status: 409 },
+            );
+        }
+        const movementCount = await prisma.inventoryMovement.count({ where: { logisticsItemId: id } });
+        if (movementCount > 0) {
+            return NextResponse.json(
+                { success: false, message: "Item memiliki riwayat mutasi stok sehingga tidak dapat dihapus. Gunakan pergerakan stok Rusak/Buang jika tidak lagi dipakai." },
+                { status: 409 },
+            );
+        }
+
         await prisma.logisticsItem.delete({
             where: { id },
         });
+
+        await writeAuditLog({ userId: user.id, action: "DELETE", entity: "LogisticsItem", entityId: id, details: { itemName: item.itemName, campId: item.campId } });
 
         return NextResponse.json({
             success: true,
@@ -216,6 +269,12 @@ export async function DELETE(
     } catch (error) {
         if (isAuthError(error)) {
             return authError(error);
+        }
+        if (isForeignKeyError(error)) {
+            return NextResponse.json(
+                { success: false, message: "Item terhubung dengan data lain sehingga tidak dapat dihapus." },
+                { status: 409 },
+            );
         }
 
         console.error("DELETE_LOGISTICS_ERROR", error);

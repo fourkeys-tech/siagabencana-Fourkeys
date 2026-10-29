@@ -91,7 +91,7 @@ export async function GET(_request: Request, { params }: Params) {
                 "Content-Type": mimeType,
                 "Content-Length": String(bytes.length),
                 "Content-Disposition": `inline; filename="${safeFileName(proof.receiptProofName)}"`,
-                "Cache-Control": "private, no-store",
+                "Cache-Control": "private, max-age=86400, immutable",
                 "X-Content-Type-Options": "nosniff",
             },
         });
