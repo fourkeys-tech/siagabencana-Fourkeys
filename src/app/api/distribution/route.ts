@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { DistributionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { canManageRequest, hasDistributionAccess, isPositiveInteger } from "@/lib/distribution";
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
 
         const campFilter =
             user.role === "SUPER_ADMIN"
-                ? (statusParam ? { status: statusParam as any } : undefined)
+                ? (statusParam ? { status: statusParam as DistributionStatus } : undefined)
                 : {
                       AND: [
                           {
@@ -32,13 +33,13 @@ export async function GET(request: Request) {
                                   { destinationCampId: user.campId ?? "" },
                               ],
                           },
-                          ...(statusParam ? [{ status: statusParam as any }] : []),
+                          ...(statusParam ? [{ status: statusParam as DistributionStatus }] : []),
                       ],
                   };
 
         const distributionFilter =
             user.role === "SUPER_ADMIN"
-                ? (statusParam ? { status: statusParam as any } : undefined)
+                ? (statusParam ? { status: statusParam as DistributionStatus } : undefined)
                 : {
                       AND: [
                           {
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
                                   { destinationCampId: user.campId ?? "" },
                               ],
                           },
-                          ...(statusParam ? [{ status: statusParam as any }] : []),
+                          ...(statusParam ? [{ status: statusParam as DistributionStatus }] : []),
                       ],
                   };
 

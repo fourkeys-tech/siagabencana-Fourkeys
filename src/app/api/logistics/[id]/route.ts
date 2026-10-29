@@ -141,7 +141,7 @@ export async function PUT(
         // Perbarui item lalu refresh status operasional dalam satu transaksi Serializable
         // agar status (CRITICAL/LOW/SUFFICIENT) langsung sinkron dengan batas minimum baru.
         const updated = await runSerializable(async (tx) => {
-            const res = await tx.logisticsItem.update({
+            await tx.logisticsItem.update({
                 where: { id },
                 data: {
                     ...(body.itemName !== undefined && { itemName: String(body.itemName).trim() }),

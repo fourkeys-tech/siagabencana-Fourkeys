@@ -14,9 +14,9 @@ function createPrismaClient() {
 
     const adapter = new PrismaPg({
         connectionString,
-        max: 5,
-        idleTimeoutMillis: 10_000,
-        connectionTimeoutMillis: 5_000,
+        max: 15,
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 10_000,
     });
 
     return new PrismaClient({
@@ -28,6 +28,5 @@ export const prisma =
     globalForPrisma.prisma ??
     createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = prisma;
-}
+// Simpan di globalThis pada semua environment agar warm container serverless me-reuse connection pool
+globalForPrisma.prisma = prisma;

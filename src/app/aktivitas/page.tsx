@@ -55,8 +55,6 @@ export default function ActivityPage() {
 	const [total, setTotal] = useState(0);
 
 	const loadData = useCallback(async (currentPage = 1) => {
-		setLoading(true);
-		setError("");
 		try {
 			const res = await fetch(`/api/activity?page=${currentPage}&limit=25`, { cache: "no-store" });
 			const data = await res.json();
@@ -70,6 +68,7 @@ export default function ActivityPage() {
 			} else if (Array.isArray(data.data)) {
 				setLogs(data.data);
 			}
+			setError("");
 		} catch (loadError) {
 			setError(loadError instanceof Error ? loadError.message : "Gagal mengambil aktivitas.");
 		} finally {
@@ -78,8 +77,32 @@ export default function ActivityPage() {
 	}, []);
 
 	useEffect(() => {
-		void loadData(1);
-	}, [loadData]);
+		let isMounted = true;
+		fetch("/api/activity?page=1&limit=25", { cache: "no-store" })
+			.then((res) => res.json())
+			.then((data) => {
+				if (!isMounted) return;
+				if (!data.success) throw new Error(data.message ?? "Gagal mengambil aktivitas.");
+				if (data.pagination) {
+					setLogs(data.data);
+					setPage(data.pagination.page);
+					setTotalPages(data.pagination.totalPages);
+					setTotal(data.pagination.total);
+				} else if (Array.isArray(data.data)) {
+					setLogs(data.data);
+				}
+				setError("");
+			})
+			.catch((loadError) => {
+				if (isMounted) setError(loadError instanceof Error ? loadError.message : "Gagal mengambil aktivitas.");
+			})
+			.finally(() => {
+				if (isMounted) setLoading(false);
+			});
+		return () => {
+			isMounted = false;
+		};
+	}, []);
 
 	return (
 		<div className="space-y-6">
@@ -158,7 +181,10 @@ export default function ActivityPage() {
 						page={page}
 						totalPages={totalPages}
 						total={total}
-						onPageChange={(newPage) => void loadData(newPage)}
+						onPageChange={(newPage) => {
+							setLoading(true);
+							void loadData(newPage);
+						}}
 						disabled={loading}
 					/>
 				</Card>

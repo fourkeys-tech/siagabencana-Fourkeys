@@ -60,8 +60,7 @@ export async function GET() {
 
         const [
             staffCount,
-            activeFamilies,
-            specialNeeds,
+            evacueeStats,
             logisticsByStatus,
             facilitiesByStatus,
             preparedDistributions,
@@ -71,19 +70,20 @@ export async function GET() {
             awaitingReceipt,
             pendingOwnRequests,
         ] = await Promise.all([
-            prisma.user.count({
-                where: { campId: { in: campIds } },
-            }),
+            campIds.length > 0
+                ? prisma.user.count({ where: { campId: { in: campIds } } })
+                : 0,
 
-            prisma.evacueeRecord.count({
-                where: { campId: { in: activeCampIds }, departedAt: null },
-            }),
+            // Menggabungkan hitung total KK dan kebutuhan khusus menjadi 1 query groupBy
+            activeCampIds.length > 0
+                ? prisma.evacueeRecord.groupBy({
+                    by: ["hasSpecialNeeds"],
+                    where: { campId: { in: activeCampIds }, departedAt: null },
+                    _count: { _all: true },
+                })
+                : [],
 
-            prisma.evacueeRecord.count({
-                where: { campId: { in: activeCampIds }, departedAt: null, hasSpecialNeeds: true },
-            }),
-
-            scope.logistics
+            scope.logistics && campIds.length > 0
                 ? prisma.logisticsItem.groupBy({
                     by: ["status"],
                     where: { campId: { in: campIds } },
@@ -91,7 +91,7 @@ export async function GET() {
                 })
                 : [],
 
-            scope.shelter
+            scope.shelter && campIds.length > 0
                 ? prisma.facilityReport.groupBy({
                     by: ["status"],
                     where: { campId: { in: campIds } },
@@ -100,7 +100,7 @@ export async function GET() {
                 : [],
 
             // Query terpisah per status agar daftar "dikirim" tidak tertutup daftar "disiapkan".
-            scope.distribution
+            scope.distribution && campIds.length > 0
                 ? prisma.distribution.findMany({
                     where: { ...campDistributionWhere, status: "RESERVED" },
                     orderBy: { updatedAt: "desc" },
@@ -109,7 +109,7 @@ export async function GET() {
                 })
                 : [],
 
-            scope.distribution
+            scope.distribution && campIds.length > 0
                 ? prisma.distribution.findMany({
                     where: { ...campDistributionWhere, status: { in: ["SHIPPED", "RECEIVED"] } },
                     orderBy: { updatedAt: "desc" },
@@ -122,18 +122,21 @@ export async function GET() {
                 ? prisma.logisticsRequest.count({ where: { status: "PENDING" } })
                 : 0,
 
-            actionKeys.has("readyToShip")
+            actionKeys.has("readyToShip") && ownCampId
                 ? prisma.distribution.count({ where: { status: "RESERVED", sourceCampId: ownCampId } })
                 : 0,
 
-            actionKeys.has("awaitingReceipt")
+            actionKeys.has("awaitingReceipt") && ownCampId
                 ? prisma.distribution.count({ where: { status: "SHIPPED", destinationCampId: ownCampId } })
                 : 0,
 
-            actionKeys.has("pendingOwnRequests")
+            actionKeys.has("pendingOwnRequests") && ownCampId
                 ? prisma.logisticsRequest.count({ where: { status: "PENDING", destinationCampId: ownCampId } })
                 : 0,
         ]);
+
+        const activeFamilies = evacueeStats.reduce((sum, item) => sum + item._count._all, 0);
+        const specialNeeds = evacueeStats.find((item) => item.hasSpecialNeeds)?._count._all ?? 0;
 
         const totalCapacity = activeCamps.reduce(
             (sum, camp) => sum + camp.maxCapacity,

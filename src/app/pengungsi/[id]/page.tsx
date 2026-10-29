@@ -58,8 +58,29 @@ export default function EvacueeDetailPage() {
 	}, [id]);
 
 	useEffect(() => {
-		void loadData();
-	}, [loadData]);
+		let isMounted = true;
+		if (!id) return;
+		fetch(`/api/evacuees/${id}`)
+			.then((res) => res.json())
+			.then((data) => {
+				if (!isMounted) return;
+				if (data.success) {
+					setEvacuee(data.data);
+					setError("");
+				} else {
+					setError(data.message ?? "Gagal memuat data pengungsi.");
+				}
+			})
+			.catch(() => {
+				if (isMounted) setError("Terjadi kesalahan koneksi.");
+			})
+			.finally(() => {
+				if (isMounted) setLoading(false);
+			});
+		return () => {
+			isMounted = false;
+		};
+	}, [id]);
 
 	const executeCheckout = async () => {
 		if (!evacuee) return;

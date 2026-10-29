@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Modal } from "./modal";
 import { Button } from "./button";
 
@@ -80,12 +80,13 @@ export function PromptDialog({
 	onClose: () => void;
 }) {
 	const [value, setValue] = useState(defaultValue);
-
-	useEffect(() => {
+	const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+	if (isOpen !== prevIsOpen) {
+		setPrevIsOpen(isOpen);
 		if (isOpen) {
 			setValue(defaultValue);
 		}
-	}, [isOpen, defaultValue]);
+	}
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();

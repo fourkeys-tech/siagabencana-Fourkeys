@@ -3,11 +3,25 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { X, LogOut, Circle } from "lucide-react";
 import { useSession } from "@/components/auth/user-provider";
 import { NAV_SECTIONS, isItemVisible } from "@/lib/navigation";
 import { Badge } from "@/components/ui/badge";
+
+function subscribeMediaQuery(callback: () => void) {
+	const mql = window.matchMedia("(min-width: 1024px)");
+	mql.addEventListener("change", callback);
+	return () => mql.removeEventListener("change", callback);
+}
+
+function getDesktopSnapshot() {
+	return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function getDesktopServerSnapshot() {
+	return false;
+}
 
 export function Sidebar({
 	mobileOpen,
@@ -20,15 +34,7 @@ export function Sidebar({
 	const router = useRouter();
 	const { user, refresh } = useSession();
 	const [loggingOut, setLoggingOut] = useState(false);
-	const [isDesktop, setIsDesktop] = useState(false);
-
-	useEffect(() => {
-		const mql = window.matchMedia("(min-width: 1024px)");
-		setIsDesktop(mql.matches);
-		const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-		mql.addEventListener("change", handler);
-		return () => mql.removeEventListener("change", handler);
-	}, []);
+	const isDesktop = useSyncExternalStore(subscribeMediaQuery, getDesktopSnapshot, getDesktopServerSnapshot);
 
 	useEffect(() => {
 		if (!mobileOpen) return;
