@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { DistributionStatus } from "@prisma/client";
+import { DistributionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { canManageRequest, hasDistributionAccess, isPositiveInteger } from "@/lib/distribution";
@@ -7,6 +7,13 @@ import { writeAuditLog } from "@/lib/audit";
 import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
 import { MAX_NOTE_LENGTH, validateOptionalText } from "@/lib/validation";
 import { convertRequestedToStock, convertToBase, normalizeUnit, type UnitDefinition } from "@/lib/unit-conversion";
+
+const DISTRIBUTION_STATUSES = new Set<string>(Object.values(DistributionStatus));
+
+// Query string bebas; enum tak dikenal harus 400, bukan diteruskan ke Prisma (validation error → 500).
+function parseDistributionStatus(value: string): DistributionStatus | null {
+    return DISTRIBUTION_STATUSES.has(value) ? value as DistributionStatus : null;
+}
 
 export async function GET(request: Request) {
     try {
@@ -20,41 +27,23 @@ export async function GET(request: Request) {
         }
 
         const url = new URL(request.url);
-        const statusParam = url.searchParams.get("status")?.trim().toUpperCase();
+        const statusParam = url.searchParams.get("status")?.trim().toUpperCase() || null;
+        const status = statusParam === null ? undefined : parseDistributionStatus(statusParam);
+        if (status === null) {
+            return NextResponse.json({ success: false, message: "Status distribusi tidak valid." }, { status: 400 });
+        }
 
-        const campFilter =
-            user.role === "SUPER_ADMIN"
-                ? (statusParam ? { status: statusParam as DistributionStatus } : undefined)
-                : {
-                      AND: [
-                          {
-                              OR: [
-                                  { sourceCampId: user.campId ?? "" },
-                                  { destinationCampId: user.campId ?? "" },
-                              ],
-                          },
-                          ...(statusParam ? [{ status: statusParam as DistributionStatus }] : []),
-                      ],
-                  };
-
-        const distributionFilter =
-            user.role === "SUPER_ADMIN"
-                ? (statusParam ? { status: statusParam as DistributionStatus } : undefined)
-                : {
-                      AND: [
-                          {
-                              OR: [
-                                  { sourceCampId: user.campId ?? "" },
-                                  { destinationCampId: user.campId ?? "" },
-                              ],
-                          },
-                          ...(statusParam ? [{ status: statusParam as DistributionStatus }] : []),
-                      ],
-                  };
+        // LogisticsRequest dan Distribution punya kolom rute + status yang sama, jadi satu filter dipakai keduanya.
+        const routeFilter = {
+            ...(user.role !== "SUPER_ADMIN" && {
+                OR: [{ sourceCampId: user.campId ?? "" }, { destinationCampId: user.campId ?? "" }],
+            }),
+            ...(status && { status }),
+        };
 
         const [requests, distributionRows, proofRows, sourceStockRows] = await Promise.all([
             prisma.logisticsRequest.findMany({
-                where: campFilter,
+                where: routeFilter,
                 orderBy: { updatedAt: "desc" },
                 include: {
                     sourceCamp: { select: { id: true, name: true } },
@@ -72,7 +61,7 @@ export async function GET(request: Request) {
                 },
             }),
             prisma.distribution.findMany({
-                where: distributionFilter,
+                where: routeFilter,
                 orderBy: { updatedAt: "desc" },
                 select: {
                     id: true,
@@ -104,7 +93,7 @@ export async function GET(request: Request) {
                 },
             }),
             prisma.distribution.findMany({
-                where: { ...distributionFilter, receiptProofData: { not: null } },
+                where: { ...routeFilter, receiptProofData: { not: null } },
                 select: { id: true, receiptProofMimeType: true },
             }),
             prisma.logisticsItem.findMany({

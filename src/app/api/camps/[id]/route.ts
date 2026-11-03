@@ -3,14 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { authError, getAccessibleCampWhere, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { campValidationMessage, parseCampInput } from "@/lib/camp-validation";
 import { writeAuditLog } from "@/lib/audit";
+import { handleRouteError } from "@/lib/api-errors";
 import { isForeignKeyError } from "@/lib/prisma-errors";
-import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { readJson } from "@/lib/http";
+import { runSerializable } from "@/lib/transaction";
 
 type Params = {
     params: Promise<{
         id: string;
     }>;
 };
+
+// Validasi input dilempar dari dalam transaksi; pesan user dibawa sampai ke catch.
+class InvalidCampInput extends Error {
+    constructor(readonly userMessage: string) {
+        super("INVALID_CAMP_INPUT");
+    }
+}
 
 export async function GET(
     _request: Request,
@@ -78,71 +87,40 @@ export async function PUT(
         const { id } = await params;
         const body = await readJson(request);
 
-        const existingCamp = await prisma.camp.findUnique({
-            where: { id },
+        // Semua cek (okupansi, kapasitas, distribusi berjalan) dibaca di transaksi yang sama dengan update:
+        // registrasi pengungsi / reservasi distribusi paralel tidak bisa lolos di antara cek dan penutupan.
+        const camp = await runSerializable(async (tx) => {
+            const existingCamp = await tx.camp.findUnique({ where: { id } });
+            if (!existingCamp) throw new Error("CAMP_NOT_FOUND");
+
+            let campInput;
+            try {
+                campInput = parseCampInput({
+                    name: body.name ?? existingCamp.name,
+                    address: body.address ?? existingCamp.address,
+                    latitude: body.latitude ?? existingCamp.latitude,
+                    longitude: body.longitude ?? existingCamp.longitude,
+                    maxCapacity: body.maxCapacity ?? existingCamp.maxCapacity,
+                    status: body.status ?? existingCamp.status,
+                }, existingCamp.currentOccupants);
+            } catch (validationError) {
+                throw new InvalidCampInput(campValidationMessage(validationError) ?? "Data posko tidak valid.");
+            }
+
+            // Posko hanya boleh ditutup jika sudah kosong dan tidak memiliki distribusi yang berjalan.
+            if (campInput.status === "CLOSED" && existingCamp.status === "ACTIVE") {
+                if (existingCamp.currentOccupants > 0) throw new Error("CAMP_HAS_ACTIVE_EVACUEES");
+                const activeDistributions = await tx.distribution.count({
+                    where: {
+                        status: { in: ["RESERVED", "SHIPPED"] },
+                        OR: [{ sourceCampId: id }, { destinationCampId: id }],
+                    },
+                });
+                if (activeDistributions > 0) throw new Error("CAMP_HAS_ACTIVE_DISTRIBUTIONS");
+            }
+
+            return tx.camp.update({ where: { id }, data: campInput });
         });
-
-        if (!existingCamp) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    message: "Posko tidak ditemukan.",
-                },
-                { status: 404 },
-            );
-        }
-
-        const nextStatus = body.status ? String(body.status).toUpperCase() : existingCamp.status;
-
-        // Posko hanya boleh ditutup jika sudah kosong dan tidak memiliki distribusi yang berjalan.
-        if (nextStatus === "CLOSED" && existingCamp.status === "ACTIVE") {
-            if (existingCamp.currentOccupants > 0) {
-                return NextResponse.json(
-                    { success: false, message: "Posko masih memiliki pengungsi aktif. Lakukan check-out seluruh pengungsi sebelum menutup posko." },
-                    { status: 409 },
-                );
-            }
-            const activeDistributions = await prisma.distribution.count({
-                where: {
-                    status: { in: ["RESERVED", "SHIPPED"] },
-                    OR: [{ sourceCampId: id }, { destinationCampId: id }],
-                },
-            });
-            if (activeDistributions > 0) {
-                return NextResponse.json(
-                    { success: false, message: "Posko masih memiliki pengiriman distribusi yang sedang berlangsung. Selesaikan atau batalkan distribusi terlebih dahulu." },
-                    { status: 409 },
-                );
-            }
-        }
-
-		let campInput;
-		try {
-			campInput = parseCampInput({
-				name: body.name ?? existingCamp.name,
-				address: body.address ?? existingCamp.address,
-				latitude: body.latitude ?? existingCamp.latitude,
-				longitude: body.longitude ?? existingCamp.longitude,
-				maxCapacity: body.maxCapacity ?? existingCamp.maxCapacity,
-				status: body.status ?? existingCamp.status,
-			}, existingCamp.currentOccupants);
-		} catch (validationError) {
-			return NextResponse.json({ success: false, message: campValidationMessage(validationError) ?? "Data posko tidak valid." }, { status: 400 });
-		}
-
-		// Update atomic: pastikan kapasitas baru tidak lebih kecil dari penghuni saat ini pada waktu commit.
-		const updated = await prisma.camp.updateMany({
-			where: { id, currentOccupants: { lte: campInput.maxCapacity } },
-			data: campInput,
-		});
-		if (updated.count !== 1) {
-			return NextResponse.json(
-				{ success: false, message: "Kapasitas baru lebih kecil dari jumlah penghuni saat ini. Muat ulang data lalu coba lagi." },
-				{ status: 409 },
-			);
-		}
-
-		const camp = await prisma.camp.findUniqueOrThrow({ where: { id } });
 
 		await writeAuditLog({ userId: currentUser.id, action: "UPDATE", entity: "Camp", entityId: id, details: { name: camp.name, status: camp.status, maxCapacity: camp.maxCapacity } });
 
@@ -152,23 +130,12 @@ export async function PUT(
             data: camp,
         });
     } catch (error) {
-        if (isInvalidJson(error)) return invalidJsonResponse();
-        if (isAuthError(error)) {
-            return authError(
-                error,
-                "Hanya Super Admin yang dapat mengubah posko.",
-            );
-        }
-
-        console.error("UPDATE_CAMP_ERROR", error);
-
-        return NextResponse.json(
-            {
-                success: false,
-                message: "Gagal memperbarui posko.",
-            },
-            { status: 500 },
-        );
+        if (error instanceof InvalidCampInput) return NextResponse.json({ success: false, message: error.userMessage }, { status: 400 });
+        return handleRouteError(error, {
+            context: "UPDATE_CAMP_ERROR",
+            fallback: "Gagal memperbarui posko.",
+            forbiddenMessage: "Hanya Super Admin yang dapat mengubah posko.",
+        });
     }
 }
 

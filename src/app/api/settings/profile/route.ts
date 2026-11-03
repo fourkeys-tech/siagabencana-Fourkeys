@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { deleteOtherSessions } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/audit";
+import { handleRouteError } from "@/lib/api-errors";
 import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
-import { isUniqueConstraintError } from "@/lib/prisma-errors";
 import { isValidEmail, MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, validatePassword, validateText } from "@/lib/validation";
 
 export async function GET() {
@@ -67,11 +67,7 @@ export async function PUT(request: Request) {
 
 		return NextResponse.json({ success: true, message: "Profil berhasil diperbarui.", data: updated });
 	} catch (error) {
-		if (isInvalidJson(error)) return invalidJsonResponse();
-		if (isUniqueConstraintError(error)) return NextResponse.json({ success: false, message: "Email sudah digunakan." }, { status: 409 });
-		if (isAuthError(error)) return authError(error);
-		console.error("UPDATE_SETTINGS_PROFILE_ERROR", error);
-		return NextResponse.json({ success: false, message: "Gagal memperbarui profil." }, { status: 500 });
+		return handleRouteError(error, { context: "UPDATE_SETTINGS_PROFILE_ERROR", fallback: "Gagal memperbarui profil." });
 	}
 }
 

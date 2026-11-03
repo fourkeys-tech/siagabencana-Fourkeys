@@ -22,6 +22,16 @@ describe("pagination helpers", () => {
 		expect(params.page).toBe(1);
 	});
 
+	it("membulatkan ke bawah nilai pecahan dan mengabaikan nilai non-angka", () => {
+		const fractional = parsePagination(new URL("https://example.com/api/camps?page=2.7&limit=10.9"));
+		expect(fractional).toEqual({ page: 2, limit: 10 });
+
+		expect(parsePagination(new URL("https://example.com/api/camps?page=abc&limit=Infinity"))).toEqual({ page: 1, limit: 50 });
+		expect(parsePagination(new URL("https://example.com/api/camps?page=Infinity&limit=1e400"))).toEqual({ page: 1, limit: 50 });
+
+		expect(parsePagination(new URL("https://example.com/api/camps?page=0.5&limit=0.2"))).toEqual({ page: 1, limit: 50 });
+	});
+
 	it("uses custom default limit", () => {
 		const url = new URL("https://example.com/api/camps");
 		const params = parsePagination(url, 25);

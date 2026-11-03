@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
 import { parsePagination, paginatedResponse } from "@/lib/pagination";
 import { writeAuditLog } from "@/lib/audit";
-import { isSerializationConflict } from "@/lib/prisma-errors";
-import { isValidTotalFamily } from "@/lib/validation";
+import { handleRouteError } from "@/lib/api-errors";
+import { assertCampActive } from "@/lib/camps";
+import { readJson } from "@/lib/http";
+import { runSerializable } from "@/lib/transaction";
+import { isValidTotalFamily, MAX_NAME_LENGTH, MAX_NOTE_LENGTH, parseBoolean, validateOptionalText, validateText } from "@/lib/validation";
 
 export async function GET(request: Request) {
     try {
@@ -72,72 +75,49 @@ export async function POST(request: Request) {
             );
         }
 
-        const body = await request.json() as Record<string, unknown>;
+        const body = await readJson(request);
 
         const campId =
             user.role === "SUPER_ADMIN"
-                ? (typeof body.campId === "string" ? body.campId : "")
+                ? (typeof body.campId === "string" ? body.campId.trim() : "")
                 : user.campId;
 
         const totalFamily = Number(body.totalFamily ?? 1);
-        const name = typeof body.name === "string" ? body.name.trim() : "";
 
-        if (!campId || !name || !isValidTotalFamily(totalFamily)) {
+        if (!campId || !isValidTotalFamily(totalFamily)) {
             return NextResponse.json(
-                {
-                    success: false,
-                    message:
-                        "campId, name, dan totalFamily yang valid wajib diisi.",
-                },
+                { success: false, message: "Posko dan jumlah anggota keluarga yang valid wajib diisi." },
                 { status: 400 },
             );
         }
 
-        const result = await prisma.$transaction(async (tx) => {
-            const camp = await tx.camp.findUnique({
-                where: { id: campId },
-            });
+        const inputError = validateText(body.name, "Nama", MAX_NAME_LENGTH) ?? validateOptionalText(body.notes, "Catatan", MAX_NOTE_LENGTH);
+        if (inputError) return NextResponse.json({ success: false, message: inputError }, { status: 400 });
 
-            if (!camp) {
-                throw new Error("CAMP_NOT_FOUND");
-            }
+        // Boolean("false") === true, jadi string dari form harus di-parse eksplisit.
+        const hasSpecialNeeds = body.hasSpecialNeeds === undefined || body.hasSpecialNeeds === null ? false : parseBoolean(body.hasSpecialNeeds);
+        if (hasSpecialNeeds === undefined) {
+            return NextResponse.json({ success: false, message: "Kebutuhan khusus harus bernilai true atau false." }, { status: 400 });
+        }
 
-            if (camp.status !== "ACTIVE") {
-                throw new Error("CAMP_NOT_ACTIVE");
-            }
+        const name = String(body.name).trim();
+        const notes = typeof body.notes === "string" && body.notes.trim() ? body.notes.trim() : null;
 
-            if (
-                camp.currentOccupants + totalFamily >
-                camp.maxCapacity
-            ) {
-                throw new Error("CAMP_FULL");
-            }
+        // Serializable + retry P2034: registrasi paralel tidak bisa sama-sama lolos cek kapasitas.
+        const result = await runSerializable(async (tx) => {
+            await assertCampActive(campId, tx);
+            const camp = await tx.camp.findUniqueOrThrow({ where: { id: campId }, select: { currentOccupants: true, maxCapacity: true } });
+            if (camp.currentOccupants + totalFamily > camp.maxCapacity) throw new Error("CAMP_FULL");
 
             const evacuee = await tx.evacueeRecord.create({
-                data: {
-                    campId,
-                    name,
-                    totalFamily,
-                    hasSpecialNeeds: Boolean(
-                        body.hasSpecialNeeds ?? false,
-                    ),
-                    notes: body.notes
-                        ? String(body.notes).trim()
-                        : null,
-                },
+                data: { campId, name, totalFamily, hasSpecialNeeds, notes },
             });
-
             await tx.camp.update({
                 where: { id: campId },
-                data: {
-                    currentOccupants: {
-                        increment: totalFamily,
-                    },
-                },
+                data: { currentOccupants: { increment: totalFamily } },
             });
-
             return evacuee;
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        });
 
         await writeAuditLog({ userId: user.id, action: "CREATE", entity: "EvacueeRecord", entityId: result.id, details: { campId, totalFamily, hasSpecialNeeds: result.hasSpecialNeeds } });
 
@@ -150,48 +130,10 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
-        if (isAuthError(error)) {
-            return authError(error);
-        }
-
-        if (error instanceof Error) {
-            if (error.message === "CAMP_NOT_FOUND") {
-                return NextResponse.json(
-                    { success: false, message: "Camp tidak ditemukan." },
-                    { status: 404 },
-                );
-            }
-
-            if (error.message === "CAMP_NOT_ACTIVE") {
-                return NextResponse.json(
-                    { success: false, message: "Posko tidak aktif sehingga tidak dapat menerima pengungsi baru." },
-                    { status: 409 },
-                );
-            }
-
-            if (isSerializationConflict(error)) {
-                return NextResponse.json(
-                    { success: false, message: "Data posko sedang diperbarui pengguna lain. Silakan coba lagi." },
-                    { status: 409 },
-                );
-            }
-
-            if (error.message === "CAMP_FULL") {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        message: "Kapasitas camp sudah tidak mencukupi.",
-                    },
-                    { status: 409 },
-                );
-            }
-        }
-
-        console.error("CREATE_EVACUEE_ERROR", error);
-
-        return NextResponse.json(
-            { success: false, message: "Gagal registrasi pengungsi." },
-            { status: 500 },
-        );
+        return handleRouteError(error, {
+            context: "CREATE_EVACUEE_ERROR",
+            fallback: "Gagal registrasi pengungsi.",
+            messages: { CAMP_NOT_ACTIVE: "Posko tidak aktif sehingga tidak dapat menerima pengungsi baru." },
+        });
     }
 }

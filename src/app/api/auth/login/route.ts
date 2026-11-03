@@ -6,11 +6,27 @@ import { writeAuditLog } from "@/lib/audit";
 import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
 import { MAX_EMAIL_LENGTH } from "@/lib/validation";
 
-// Rate limiting in-memory sederhana: maks 5 percobaan gagal per 15 menit per email
+// Rate limiting in-memory sederhana: maks 5 percobaan gagal per 15 menit per email.
+// Keterbatasan: state per instance (Fluid Compute bisa menjalankan beberapa instance) dan hilang saat
+// cold start. Limit lintas instance butuh store eksternal (Redis/KV).
 type RateLimitEntry = { attempts: number; resetAt: number };
 const loginAttempts = new Map<string, RateLimitEntry>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000; // 15 menit
+const MAX_TRACKED_EMAILS = 10_000;
+
+// Cegah Map tumbuh tanpa batas (email acak dari bot): buang entry kedaluwarsa, lalu yang tertua
+// (urutan iterasi Map = urutan insert) bila masih melebihi batas.
+function pruneAttempts(now = Date.now()) {
+    if (loginAttempts.size < MAX_TRACKED_EMAILS) return;
+    for (const [email, entry] of loginAttempts) {
+        if (now > entry.resetAt) loginAttempts.delete(email);
+    }
+    for (const email of loginAttempts.keys()) {
+        if (loginAttempts.size < MAX_TRACKED_EMAILS) break;
+        loginAttempts.delete(email);
+    }
+}
 
 function isRateLimited(email: string): boolean {
     const entry = loginAttempts.get(email);
@@ -25,6 +41,8 @@ function isRateLimited(email: string): boolean {
 function recordFailedAttempt(email: string) {
     const entry = loginAttempts.get(email);
     if (!entry || Date.now() > entry.resetAt) {
+        loginAttempts.delete(email);
+        pruneAttempts();
         loginAttempts.set(email, { attempts: 1, resetAt: Date.now() + WINDOW_MS });
     } else {
         entry.attempts += 1;

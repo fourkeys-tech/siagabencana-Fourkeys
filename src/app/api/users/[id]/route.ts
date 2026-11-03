@@ -3,10 +3,10 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { authError, canAssignRole, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { writeAuditLog } from "@/lib/audit";
-import { isForeignKeyError, isUniqueConstraintError } from "@/lib/prisma-errors";
+import { handleRouteError } from "@/lib/api-errors";
 import { deleteOtherSessions, deleteUserSessions } from "@/lib/auth/session";
-import { assertCampActive, campError } from "@/lib/camps";
-import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { assertCampActive } from "@/lib/camps";
+import { readJson } from "@/lib/http";
 import { isValidEmail, MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, validatePassword, validateText } from "@/lib/validation";
 
 type Params = {
@@ -283,24 +283,8 @@ export async function PUT(
             data: user,
         });
     } catch (error) {
-        if (isInvalidJson(error)) return invalidJsonResponse();
-        if (isUniqueConstraintError(error)) {
-            return NextResponse.json({ success: false, message: "Email sudah digunakan." }, { status: 409 });
-        }
-        const knownCampError = campError(error);
-        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
-        if (error instanceof Error && error.message === "CAMP_MANAGER_EXISTS") return NextResponse.json({ success: false, message: "Posko tersebut sudah memiliki manager." }, { status: 409 });
-        if (error instanceof Error && error.message === "DIVISION_HEAD_EXISTS") return NextResponse.json({ success: false, message: "Divisi tersebut sudah memiliki ketua di posko ini." }, { status: 409 });
-        if (isAuthError(error)) {
-            return authError(error, "Tidak memiliki akses untuk mengedit anggota.");
-        }
-
-        console.error("UPDATE_USER_ERROR", error);
-
-        return NextResponse.json(
-            { success: false, message: "Gagal memperbarui user." },
-            { status: 500 },
-        );
+        // P2002 dipetakan per constraint (email / manager posko / ketua divisi), bukan selalu "email".
+        return handleRouteError(error, { context: "UPDATE_USER_ERROR", fallback: "Gagal memperbarui user.", forbiddenMessage: "Tidak memiliki akses untuk mengedit anggota." });
     }
 }
 
@@ -360,21 +344,11 @@ export async function DELETE(
             message: "User berhasil dihapus.",
         });
     } catch (error) {
-        if (isAuthError(error)) {
-            return authError(error, "Hanya Super Admin.");
-        }
-        if (isForeignKeyError(error)) {
-            return NextResponse.json(
-                { success: false, message: "User masih terhubung dengan data lain sehingga tidak dapat dihapus." },
-                { status: 409 },
-            );
-        }
-
-        console.error("DELETE_USER_ERROR", error);
-
-        return NextResponse.json(
-            { success: false, message: "Gagal menghapus user." },
-            { status: 500 },
-        );
+        return handleRouteError(error, {
+            context: "DELETE_USER_ERROR",
+            fallback: "Gagal menghapus user.",
+            forbiddenMessage: "Hanya Super Admin.",
+            foreignKeyMessage: "User masih terhubung dengan data lain sehingga tidak dapat dihapus.",
+        });
     }
 }

@@ -15,9 +15,16 @@ export type PaginatedResponse<T> = {
 	};
 };
 
+// Bilangan bulat positif dari query; pecahan dibulatkan ke bawah (Prisma menolak skip/take pecahan → 500),
+// NaN/Infinity/≤0 memakai fallback.
+function positiveInt(raw: string | null, fallback: number) {
+	const value = Math.floor(Number(raw));
+	return Number.isSafeInteger(value) && value >= 1 ? value : fallback;
+}
+
 export function parsePagination(url: URL, defaultLimit = 50, maxLimit = 100): PaginationParams {
-	const page = Math.max(Number(url.searchParams.get("page") ?? 1) || 1, 1);
-	const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? defaultLimit) || defaultLimit, 1), maxLimit);
+	const page = positiveInt(url.searchParams.get("page"), 1);
+	const limit = Math.min(positiveInt(url.searchParams.get("limit"), defaultLimit), maxLimit);
 	return { page, limit };
 }
 

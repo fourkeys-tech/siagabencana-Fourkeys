@@ -3,9 +3,9 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { authError, isAuthError, requireAuth, requireRole } from "@/lib/auth/guard";
 import { writeAuditLog } from "@/lib/audit";
-import { assertCampActive, campError } from "@/lib/camps";
-import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
-import { isUniqueConstraintError } from "@/lib/prisma-errors";
+import { handleRouteError } from "@/lib/api-errors";
+import { assertCampActive } from "@/lib/camps";
+import { readJson } from "@/lib/http";
 import { paginatedResponse, parsePagination } from "@/lib/pagination";
 import { isValidEmail, MAX_EMAIL_LENGTH, MAX_NAME_LENGTH, validatePassword, validateText } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
@@ -216,27 +216,7 @@ export async function POST(request: Request) {
             { status: 201 },
         );
     } catch (error) {
-        if (isInvalidJson(error)) return invalidJsonResponse();
-        if (isUniqueConstraintError(error)) {
-            return NextResponse.json({ success: false, message: "Email sudah digunakan." }, { status: 409 });
-        }
-        const knownCampError = campError(error);
-        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
-        if (error instanceof Error && error.message === "CAMP_MANAGER_EXISTS") {
-            return NextResponse.json({ success: false, message: "Posko tersebut sudah memiliki manager." }, { status: 409 });
-        }
-        if (error instanceof Error && error.message === "DIVISION_HEAD_EXISTS") {
-            return NextResponse.json({ success: false, message: "Divisi tersebut sudah memiliki ketua di posko ini." }, { status: 409 });
-        }
-        if (isAuthError(error)) {
-            return authError(error, "Hanya Super Admin.");
-        }
-
-        console.error("CREATE_USER_ERROR", error);
-
-        return NextResponse.json(
-            { success: false, message: "Gagal membuat user." },
-            { status: 500 },
-        );
+        // P2002 dipetakan per constraint (email / manager posko / ketua divisi), bukan selalu "email".
+        return handleRouteError(error, { context: "CREATE_USER_ERROR", fallback: "Gagal membuat user.", forbiddenMessage: "Hanya Super Admin." });
     }
 }

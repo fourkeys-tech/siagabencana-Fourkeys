@@ -146,12 +146,13 @@ export async function GET() {
             (camp) => camp.status === "ACTIVE",
         );
 
-        const totalCapacity = data.reduce(
+        // Kapasitas & okupansi agregat hanya dari posko ACTIVE (posko CLOSED tidak menampung), sama dengan dashboard.
+        const totalCapacity = activeCamps.reduce(
             (sum, camp) => sum + camp.maxCapacity,
             0,
         );
 
-        const totalOccupants = data.reduce(
+        const totalOccupants = activeCamps.reduce(
             (sum, camp) => sum + camp.currentOccupants,
             0,
         );

@@ -1,10 +1,9 @@
-import { Prisma } from "@prisma/client";
 import type { InventoryMovementType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { isSerializationConflict } from "@/lib/prisma-errors";
+import { runSerializable, type Transaction } from "@/lib/transaction";
 import { convertBaseToStock, convertToBase, type UnitDefinition } from "@/lib/unit-conversion";
 
-type Transaction = Prisma.TransactionClient;
+// Re-export agar import lama dari "@/lib/inventory" tetap berfungsi.
+export { runSerializable, type Transaction };
 type InventoryMovementKind = "RECEIPT" | "DAMAGE" | "LOSS" | "RESTORE" | "DISPOSE" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
 type UnitDimension = "COUNT" | "MASS" | "VOLUME";
 type ConversionStatus = "CONFIGURED" | "NEEDS_REVIEW";
@@ -119,29 +118,6 @@ export async function refreshOperationalStatus(tx: Transaction, logisticsItemId:
 		"updatedAt" = CURRENT_TIMESTAMP
 		WHERE "id" = ${logisticsItemId}
 	`;
-}
-
-async function sleep(ms: number) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Menjalankan transaksi Serializable dengan retry otomatis saat P2034 (konflik konkurensi).
-export async function runSerializable<T>(operation: (tx: Transaction) => Promise<T>, maxRetries = 3): Promise<T> {
-	let attempt = 0;
-	while (attempt < maxRetries) {
-		try {
-			return await prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-		} catch (error) {
-			attempt += 1;
-			if (attempt < maxRetries && isSerializationConflict(error)) {
-				const backoff = 25 * 2 ** attempt + Math.floor(Math.random() * 25);
-				await sleep(backoff);
-				continue;
-			}
-			throw error;
-		}
-	}
-	throw new Error("P2034_EXHAUSTED");
 }
 
 async function assertCampIsActive(tx: Transaction, campId: string) {

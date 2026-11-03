@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, getAccessibleCampWhere, isAuthError, requireRole } from "@/lib/auth/guard";
+import { getAccessibleCampWhere, requireRole } from "@/lib/auth/guard";
 import { writeReportToGoogleSheet, type ReportSheetRow } from "@/lib/google-sheets";
 import { writeAuditLog } from "@/lib/audit";
+import { handleRouteError } from "@/lib/api-errors";
+import { readJson } from "@/lib/http";
 
 function parseDate(value: string | null, endOfDay = false) {
 	if (!value) return null;
@@ -13,7 +15,7 @@ function parseDate(value: string | null, endOfDay = false) {
 export async function POST(request: Request) {
 	try {
 		const user = await requireRole("SUPER_ADMIN", "MANAGER");
-		const body = await request.json() as Record<string, unknown>;
+		const body = await readJson(request);
 		const fromValue = typeof body.from === "string" ? body.from : null;
 		const toValue = typeof body.to === "string" ? body.to : null;
 		const from = parseDate(fromValue);
@@ -103,12 +105,10 @@ export async function POST(request: Request) {
 		await writeAuditLog({ userId: user.id, action: "EXPORT", entity: "Report", details: { target: "GOOGLE_SHEETS", from: fromValue, to: toValue } });
 		return NextResponse.json({ success: true, message: "Laporan berhasil dikirim ke Google Sheets.", data: result });
 	} catch (error) {
-		if (isAuthError(error)) return authError(error, "Hanya Super Admin atau Manager yang dapat mengekspor laporan.");
-
-		console.error("EXPORT_REPORT_SHEETS_ERROR", error);
-		return NextResponse.json(
-			{ success: false, message: "Gagal mengirim laporan ke Google Sheets." },
-			{ status: 500 },
-		);
+		return handleRouteError(error, {
+			context: "EXPORT_REPORT_SHEETS_ERROR",
+			fallback: "Gagal mengirim laporan ke Google Sheets.",
+			forbiddenMessage: "Hanya Super Admin atau Manager yang dapat mengekspor laporan.",
+		});
 	}
 }

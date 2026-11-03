@@ -21,5 +21,5 @@ export function isGoogleSheetsConfigured(): boolean {
 }
 
 export function getCronSecret(): string | null {
-	return process.env.CRON_SECRET ?? null;
+	return process.env.CRON_SECRET?.trim() || null;
 }
