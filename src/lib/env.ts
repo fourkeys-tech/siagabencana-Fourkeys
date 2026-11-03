@@ -20,6 +20,13 @@ export function isGoogleSheetsConfigured(): boolean {
 	);
 }
 
+export function isGoogleAuthConfigured(): boolean {
+	return Boolean(
+		process.env.GOOGLE_CLIENT_ID?.trim() &&
+		process.env.GOOGLE_CLIENT_SECRET?.trim(),
+	);
+}
+
 export function getCronSecret(): string | null {
 	return process.env.CRON_SECRET?.trim() || null;
 }
