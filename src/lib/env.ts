@@ -9,6 +9,16 @@ export function getDatabaseUrl(): string {
 	return url;
 }
 
+/**
+ * pg 8.x sudah memperlakukan sslmode prefer/require/verify-ca sebagai verify-full, tapi mencetak
+ * SECURITY WARNING setiap kali koneksi dibuat. Menuliskan verify-full secara eksplisit mempertahankan
+ * perilaku yang sama persis (sertifikat + hostname diverifikasi), menghilangkan warning, dan mengunci
+ * keamanan saat pg v9 nanti mengubah arti "require" menjadi lebih lemah.
+ */
+export function withExplicitSslMode(url: string): string {
+	return url.replace(/([?&]sslmode=)(prefer|require|verify-ca)(?=&|#|$)/i, "$1verify-full");
+}
+
 export function isProduction(): boolean {
 	return process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
 }

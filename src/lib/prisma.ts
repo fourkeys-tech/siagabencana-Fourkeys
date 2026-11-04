@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { withExplicitSslMode } from "@/lib/env";
 
 const globalForPrisma = globalThis as unknown as {
     prisma: PrismaClient | undefined;
@@ -13,7 +14,7 @@ function createPrismaClient() {
     }
 
     const adapter = new PrismaPg({
-        connectionString,
+        connectionString: withExplicitSslMode(connectionString),
         max: 15,
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 10_000,
