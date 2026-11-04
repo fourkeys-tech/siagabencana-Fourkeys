@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authError, isAuthError, requireRole } from "@/lib/auth/guard";
+import { isGoogleServiceAccountConfigured } from "@/lib/env";
 
 export async function GET() {
 	try {
@@ -11,10 +12,7 @@ export async function GET() {
 				version: process.env.npm_package_version ?? "0.1.0",
 				nodeEnvironment: process.env.NODE_ENV ?? "development",
 				databaseConfigured: Boolean(process.env.DATABASE_URL),
-				googleSheetsConfigured: Boolean(
-					process.env.GOOGLE_SPREADSHEET_ID &&
-					process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64,
-				),
+				googleServiceAccountConfigured: isGoogleServiceAccountConfigured(),
 			},
 		});
 	} catch (error) {

@@ -133,20 +133,21 @@ export async function deleteOtherSessions(userId: string) {
     });
 }
 
-export async function deleteSession() {
+// Hapus sesi aktif dalam satu round-trip DB (DELETE ... RETURNING).
+// Mengembalikan userId bila sesi masih berlaku (untuk audit log), null bila tidak ada/kedaluwarsa.
+export async function deleteSession(): Promise<string | null> {
     const cookieStore = await cookies();
-
     const token = cookieStore.get(SESSION_COOKIE)?.value;
+    cookieStore.delete(SESSION_COOKIE);
 
-    if (token) {
-        const tokenHash = hashToken(token);
-
-        await prisma.session.deleteMany({
-            where: {
-                tokenHash,
-            },
-        });
+    if (!token) {
+        return null;
     }
 
-    cookieStore.delete(SESSION_COOKIE);
+    const rows = await prisma.$queryRaw<{ userId: string; expiresAt: Date }[]>`
+        DELETE FROM "Session" WHERE "tokenHash" = ${hashToken(token)} RETURNING "userId", "expiresAt"
+    `;
+    const session = rows[0];
+
+    return session && session.expiresAt > new Date() ? session.userId : null;
 }

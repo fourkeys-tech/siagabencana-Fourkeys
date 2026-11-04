@@ -79,6 +79,9 @@ model User {
   role     Role
   division DivisionType?
 
+  /// ID Google Spreadsheet tujuan ekspor laporan milik akun ini (Super Admin/Manager).
+  reportSpreadsheetId String?
+
   campId                    String?
   camp                      Camp?               @relation("CampStaff", fields: [campId], references: [id], onDelete: SetNull)
   managedCamp               Camp?               @relation("CampManager")

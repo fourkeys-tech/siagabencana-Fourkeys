@@ -13,11 +13,9 @@ export function isProduction(): boolean {
 	return process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
 }
 
-export function isGoogleSheetsConfigured(): boolean {
-	return Boolean(
-		process.env.GOOGLE_SPREADSHEET_ID &&
-		process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64,
-	);
+/** Kredensial service account Google (sekali per server). Spreadsheet tujuan diatur per akun di Pengaturan. */
+export function isGoogleServiceAccountConfigured(): boolean {
+	return Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64?.trim());
 }
 
 export function isGoogleAuthConfigured(): boolean {

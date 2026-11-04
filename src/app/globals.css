@@ -107,7 +107,27 @@ button:disabled {
 }
 
 @media print {
+	@page {
+		margin: 1.2cm;
+		size: auto;
+	}
+
 	body {
-		background: white;
+		background: #ffffff !important;
+		color: #0b1730 !important;
+	}
+
+	/* Hilangkan scroll container agar tabel dicetak penuh selebar halaman */
+	[role="region"] {
+		overflow: visible !important;
+	}
+
+	table {
+		min-width: 100% !important;
+		font-size: 11px !important;
+	}
+
+	th, td {
+		padding: 6px 8px !important;
 	}
 }

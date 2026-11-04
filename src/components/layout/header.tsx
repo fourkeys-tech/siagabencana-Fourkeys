@@ -12,7 +12,7 @@ export function Header({ onMenuClick, mobileOpen = false }: { onMenuClick: () =>
 	const { user } = useSession();
 
 	return (
-		<header className="fixed left-0 right-0 z-30 h-16 border-b border-[var(--line)] bg-white/95 backdrop-blur lg:left-72" aria-label="Header workspace">
+		<header className="fixed left-0 right-0 z-30 h-16 border-b border-[var(--line)] bg-white/95 backdrop-blur lg:left-72 print:hidden" aria-label="Header workspace">
 			<div className="flex h-full min-w-0 items-center justify-between gap-2 px-3 sm:px-6 lg:px-8">
 				<div className="flex min-w-0 items-center gap-2 sm:gap-3">
 					<button

@@ -7,6 +7,7 @@ import { PUT as updateLogistics } from "@/app/api/logistics/[id]/route";
 import { POST as registerEvacuee } from "@/app/api/evacuees/route";
 import { GET as listDistribution } from "@/app/api/distribution/route";
 import { GET as cronCleanup } from "@/app/api/cron/cleanup/route";
+import { GET as getReports } from "@/app/api/reports/route";
 import { createCamp, createItem, createRequest, createUser, describeDb, item, resetDatabase } from "./helpers";
 
 // Route handler dipanggil langsung; sesi diganti user test agar tidak butuh cookie Next.js.
@@ -176,6 +177,81 @@ describeDb("route Fase B", () => {
 			vi.stubEnv("VERCEL_ENV", "production");
 			vi.spyOn(console, "error").mockImplementation(() => {});
 			expect((await cronCleanup(new Request("http://localhost/api/cron/cleanup"))).status).toBe(401);
+		});
+	});
+
+	describe("GET /api/reports", () => {
+		it("mengembalikan data laporan snapshot & periode secara terkonsolidasi", async () => {
+			const camp = await createCamp({ maxCapacity: 200, currentOccupants: 15 });
+			const itemStock = await createItem(camp.id, { itemName: "Beras Pandan", quantity: 50 });
+
+			// Buat transaksi mutasi stok
+			await prisma.inventoryMovement.create({
+				data: {
+					logisticsItemId: itemStock.id,
+					campId: camp.id,
+					type: "RECEIPT",
+					quantity: 20,
+					unit: "pcs",
+					baseQuantity: 20,
+					baseUnit: "pcs",
+					reason: "Bantuan masuk",
+				},
+			});
+
+			// Buat pengungsi
+			await prisma.evacueeRecord.create({
+				data: {
+					campId: camp.id,
+					name: "Siti Rahma",
+					totalFamily: 4,
+					arrivedAt: new Date(),
+				},
+			});
+
+			const res = await getReports(new Request("http://localhost/api/reports?from=2026-11-01&to=2026-11-04"));
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { success: boolean; data: Record<string, unknown> };
+			expect(body.success).toBe(true);
+
+			const summary = body.data.summary as Record<string, number>;
+			expect(summary.totalCamps).toBe(1);
+			expect(summary.totalCapacity).toBe(200);
+			expect(summary.totalOccupants).toBe(15);
+			expect(summary.arrivedEvacueeFamilies).toBe(4);
+			expect(summary.totalMovementsCount).toBe(1);
+
+			const movements = body.data.stockMovements as Array<Record<string, unknown>>;
+			expect(movements).toHaveLength(1);
+			expect(movements[0]?.itemName).toBe("Beras Pandan");
+			expect(movements[0]?.receiptQty).toBe(20);
+		});
+
+		it("format=csv mengembalikan stream CSV lengkap dengan UTF-8 BOM", async () => {
+			const camp = await createCamp({ maxCapacity: 100, currentOccupants: 5 });
+			await createItem(camp.id, { itemName: "Minyak Goreng", quantity: 10 });
+
+			const res = await getReports(new Request("http://localhost/api/reports?from=2026-11-01&to=2026-11-04&format=csv"));
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toContain("text/csv");
+			expect(res.headers.get("content-disposition")).toContain("attachment; filename=");
+
+			const buffer = await res.arrayBuffer();
+			const bytes = new Uint8Array(buffer);
+			expect(bytes[0]).toBe(0xef);
+			expect(bytes[1]).toBe(0xbb);
+			expect(bytes[2]).toBe(0xbf);
+			const text = new TextDecoder().decode(buffer);
+			expect(text).toContain("LAPORAN OPERASIONAL SIAGA BENCANA");
+			expect(text).toContain("Minyak Goreng");
+		});
+
+		it("menolak parameter tanggal yang tidak valid dengan 400", async () => {
+			const invalidDate = await getReports(new Request("http://localhost/api/reports?from=2026-02-31&to=2026-11-04"));
+			expect(invalidDate.status).toBe(400);
+
+			const invertedRange = await getReports(new Request("http://localhost/api/reports?from=2026-11-10&to=2026-11-01"));
+			expect(invertedRange.status).toBe(400);
 		});
 	});
 });

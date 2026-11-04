@@ -55,21 +55,20 @@ function LoginForm() {
 		}
 	}, [returnTo, router, sessionLoading, status, user]);
 
-	useEffect(() => {
-		if (errorParam) {
-			const errorMessages: Record<string, string> = {
-				unregistered: emailParam
-					? `Akun Google (${emailParam}) belum terdaftar sebagai petugas di Siaga Bencana. Silakan hubungi Administrator.`
-					: "Akun Google Anda belum terdaftar sebagai petugas di Siaga Bencana. Silakan hubungi Administrator.",
-				google_cancelled: "Proses masuk dengan Google telah dibatalkan.",
-				invalid_state: "Sesi login Google telah kedaluwarsa atau tidak valid. Silakan coba masuk kembali.",
-				token_exchange_failed: "Gagal memverifikasi akun Google. Silakan periksa koneksi atau coba beberapa saat lagi.",
-				email_not_verified: "Email akun Google Anda belum diverifikasi oleh Google.",
-				not_configured: "Autentikasi Google belum dikonfigurasi. Pastikan GOOGLE_CLIENT_ID dan GOOGLE_CLIENT_SECRET sudah diisi di .env.",
-			};
-			setError(errorMessages[errorParam] ?? "Terjadi kesalahan saat masuk dengan Google.");
-		}
-	}, [errorParam, emailParam]);
+	const oauthError = errorParam
+		? (({
+			unregistered: emailParam
+				? `Akun Google (${emailParam}) belum terdaftar sebagai petugas di Siaga Bencana. Silakan hubungi Administrator.`
+				: "Akun Google Anda belum terdaftar sebagai petugas di Siaga Bencana. Silakan hubungi Administrator.",
+			google_cancelled: "Proses masuk dengan Google telah dibatalkan.",
+			invalid_state: "Sesi login Google telah kedaluwarsa atau tidak valid. Silakan coba masuk kembali.",
+			token_exchange_failed: "Gagal memverifikasi akun Google. Silakan periksa koneksi atau coba beberapa saat lagi.",
+			email_not_verified: "Email akun Google Anda belum diverifikasi oleh Google.",
+			not_configured: "Autentikasi Google belum dikonfigurasi. Pastikan GOOGLE_CLIENT_ID dan GOOGLE_CLIENT_SECRET sudah diisi di .env.",
+		} as Record<string, string>)[errorParam] ?? "Terjadi kesalahan saat masuk dengan Google.")
+		: "";
+
+	const displayError = error || oauthError;
 
 	const handleGoogleLogin = () => {
 		if (googleLoading || loading || sessionLoading) return;
@@ -154,9 +153,9 @@ function LoginForm() {
 			</div>
 
 			{/* Error Message */}
-			{error && (
+			{displayError && (
 				<div id="login-error" role="alert" className="mb-5 animate-in fade-in duration-200">
-					<Alert type="error">{error}</Alert>
+					<Alert type="error">{displayError}</Alert>
 				</div>
 			)}
 

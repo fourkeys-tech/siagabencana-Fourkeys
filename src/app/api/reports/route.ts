@@ -1,216 +1,85 @@
-import { NextResponse } from "next/server";
+import { canManageDivision, getAccessibleCampWhere, requireAuth } from "@/lib/auth/guard";
 import { prisma } from "@/lib/prisma";
-import { authError, canManageDivision, getAccessibleCampWhere, isAuthError, requireAuth } from "@/lib/auth/guard";
-import { PROBLEM_FACILITY_STATUSES, PROBLEM_LOGISTICS_STATUSES } from "@/lib/status-groups";
-
-function parseDate(value: string | null, endOfDay = false) {
-	if (!value) return null;
-
-	const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
-	return Number.isNaN(date.getTime()) ? null : date;
-}
+import { isGoogleServiceAccountConfigured } from "@/lib/env";
+import { fail, ok } from "@/lib/api-response";
+import { handleRouteError } from "@/lib/api-errors";
+import { buildReportCsv, buildReportData, parseReportDate } from "@/lib/reports";
 
 export async function GET(request: Request) {
 	try {
 		const user = await requireAuth();
 		const url = new URL(request.url);
-		const from = parseDate(url.searchParams.get("from"));
-		const to = parseDate(url.searchParams.get("to"), true);
+
+		const fromParam = url.searchParams.get("from");
+		const toParam = url.searchParams.get("to");
+		const format = url.searchParams.get("format")?.toLowerCase() ?? "json";
+
+		const from = parseReportDate(fromParam, false);
+		const to = parseReportDate(toParam, true);
 
 		if (url.searchParams.has("from") && !from) {
-			return NextResponse.json(
-				{ success: false, message: "Tanggal mulai tidak valid." },
-				{ status: 400 },
-			);
+			return fail("Tanggal mulai tidak valid (format: YYYY-MM-DD).", 400);
 		}
 
 		if (url.searchParams.has("to") && !to) {
-			return NextResponse.json(
-				{ success: false, message: "Tanggal akhir tidak valid." },
-				{ status: 400 },
-			);
+			return fail("Tanggal akhir tidak valid (format: YYYY-MM-DD).", 400);
 		}
 
 		if (from && to && from > to) {
-			return NextResponse.json(
-				{ success: false, message: "Tanggal mulai tidak boleh melewati tanggal akhir." },
-				{ status: 400 },
-			);
+			return fail("Tanggal mulai tidak boleh melewati tanggal akhir.", 400);
 		}
 
 		const campWhere = getAccessibleCampWhere(user);
-		const canViewEvacueeNames = user.role === "SUPER_ADMIN" || user.role === "MANAGER" || Boolean(user.campId && canManageDivision(user, "DATA_REGISTRATION", user.campId));
+		const canViewEvacueeNames = user.role === "SUPER_ADMIN"
+			|| user.role === "MANAGER"
+			|| Boolean(user.campId && canManageDivision(user, "DATA_REGISTRATION", user.campId));
 
 		const hasDateFilter = url.searchParams.has("from") || url.searchParams.has("to");
+		// Default 30 hari terakhir bila tidak ada parameter tanggal
 		const effectiveFrom = from ?? (hasDateFilter ? null : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 		const effectiveTo = to ?? (hasDateFilter ? null : new Date());
-		const period = effectiveFrom || effectiveTo ? { gte: effectiveFrom ?? undefined, lte: effectiveTo ?? undefined } : undefined;
 
-		const camps = await prisma.camp.findMany({
-			where: campWhere,
-			select: {
-				id: true,
-				name: true,
-				maxCapacity: true,
-				currentOccupants: true,
-				status: true,
-			},
-			orderBy: { name: "asc" },
-		});
-		const campIds = camps.map((camp) => camp.id);
-
-		const [evacuees, logistics, facilities, distributions] = await Promise.all([
-			prisma.evacueeRecord.findMany({
-				where: {
-					campId: { in: campIds },
-					...(period ? { arrivedAt: period } : {}),
-				},
-				select: {
-					id: true,
-					...(canViewEvacueeNames ? { name: true } : {}),
-					totalFamily: true,
-					hasSpecialNeeds: true,
-					arrivedAt: true,
-					departedAt: true,
-					camp: { select: { id: true, name: true } },
-				},
-				orderBy: { arrivedAt: "desc" },
+		const canExportSheets = format !== "csv" && (user.role === "SUPER_ADMIN" || user.role === "MANAGER");
+		const [report, sheetsOwner] = await Promise.all([
+			buildReportData({
+				prisma,
+				campWhere,
+				canViewEvacueeNames,
+				from: effectiveFrom,
+				to: effectiveTo,
 			}),
-			prisma.logisticsItem.findMany({
-				where: { campId: { in: campIds } },
-				select: {
-					id: true,
-					itemName: true,
-					quantity: true,
-					unit: true,
-					quantityBase: true,
-					baseUnit: true,
-					conversionStatus: true,
-					status: true,
-					camp: { select: { id: true, name: true } },
-				},
-				orderBy: { updatedAt: "desc" },
-			}),
-			prisma.facilityReport.findMany({
-				where: {
-					campId: { in: campIds },
-					...(period ? { createdAt: period } : {}),
-				},
-				select: {
-					id: true,
-					facilityName: true,
-					status: true,
-					description: true,
-					createdAt: true,
-					camp: { select: { id: true, name: true } },
-				},
-				orderBy: { createdAt: "desc" },
-			}),
-			prisma.distribution.findMany({
-				where: {
-					OR: [
-						{ sourceCampId: { in: campIds } },
-						{ destinationCampId: { in: campIds } },
-					],
-					...(period ? { createdAt: period } : {}),
-				},
-				select: {
-					id: true,
-					itemName: true,
-					quantity: true,
-					unit: true,
-					baseQuantity: true,
-					baseUnit: true,
-					conversionStatus: true,
-					status: true,
-					createdAt: true,
-					shippedAt: true,
-					receivedAt: true,
-					sourceCamp: { select: { id: true, name: true } },
-					destinationCamp: { select: { id: true, name: true } },
-				},
-				orderBy: { createdAt: "desc" },
-			}),
+			canExportSheets
+				? prisma.user.findUnique({ where: { id: user.id }, select: { reportSpreadsheetId: true } })
+				: null,
 		]);
 
-		const evacueesByCamp = new Map<string, typeof evacuees>();
-		for (const record of evacuees) {
-			const list = evacueesByCamp.get(record.camp.id);
-			if (list) list.push(record);
-			else evacueesByCamp.set(record.camp.id, [record]);
-		}
-		const logisticsByCamp = new Map<string, typeof logistics>();
-		for (const item of logistics) {
-			const list = logisticsByCamp.get(item.camp.id);
-			if (list) list.push(item);
-			else logisticsByCamp.set(item.camp.id, [item]);
-		}
-		const facilitiesByCamp = new Map<string, typeof facilities>();
-		for (const facility of facilities) {
-			const list = facilitiesByCamp.get(facility.camp.id);
-			if (list) list.push(facility);
-			else facilitiesByCamp.set(facility.camp.id, [facility]);
-		}
-
-		const totalCapacity = camps.reduce((sum, camp) => sum + camp.maxCapacity, 0);
-		const totalOccupants = camps.reduce((sum, camp) => sum + camp.currentOccupants, 0);
-		const campRows = camps.map((camp) => {
-			const campEvacuees = evacueesByCamp.get(camp.id) ?? [];
-			const campLogistics = logisticsByCamp.get(camp.id) ?? [];
-			const campFacilities = facilitiesByCamp.get(camp.id) ?? [];
-
-			return {
-				...camp,
-				occupancyPercentage: camp.maxCapacity > 0
-					? Number(((camp.currentOccupants / camp.maxCapacity) * 100).toFixed(2))
-					: 0,
-				evacueeRecords: campEvacuees.length,
-				evacueeFamilies: campEvacuees.reduce((sum, record) => sum + record.totalFamily, 0),
-				// Jumlah lintas unit (kg + dus + pcs) tidak bermakna, jadi hanya jumlah jenis barang yang dilaporkan.
-				logisticsItems: campLogistics.length,
-				problemLogistics: campLogistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
-				damagedFacilities: campFacilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
-			};
-		});
-
-		return NextResponse.json({
-			success: true,
-			data: {
-				period: {
-					from: (effectiveFrom ?? from)?.toISOString() ?? null,
-					to: (effectiveTo ?? to)?.toISOString() ?? null,
+		if (format === "csv") {
+			const csv = buildReportCsv(report);
+			const filename = `laporan-siagabencana-${report.period.fromFormatted}-sd-${report.period.toFormatted}.csv`;
+			return new Response(csv, {
+				status: 200,
+				headers: {
+					"Content-Type": "text/csv; charset=utf-8",
+					"Content-Disposition": `attachment; filename="${filename}"`,
+					"Cache-Control": "no-store",
 				},
-				summary: {
-					totalCamps: camps.length,
-					totalCapacity,
-					totalOccupants,
-					occupancyPercentage: totalCapacity > 0
-						? Number(((totalOccupants / totalCapacity) * 100).toFixed(2))
-						: 0,
-					totalEvacueeRecords: evacuees.length,
-					totalEvacueeFamilies: evacuees.reduce((sum, record) => sum + record.totalFamily, 0),
-					specialNeeds: evacuees.filter((record) => record.hasSpecialNeeds).length,
-					logisticsItems: logistics.length,
-					criticalLogistics: logistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
-					damagedFacilities: facilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
-					distributions: distributions.length,
-					receivedDistributions: distributions.filter((distribution) => distribution.status === "RECEIVED").length,
-				},
-				camps: campRows,
-				canViewEvacueeNames,
-				evacuees: canViewEvacueeNames ? evacuees : [],
-				logistics,
-				facilities,
-				distributions,
-			},
+			});
+		}
+
+		return ok({
+			...report,
+			// null = role ini tidak bisa ekspor ke Sheets (tombol disembunyikan).
+			sheets: canExportSheets
+				? {
+					serviceAccountConfigured: isGoogleServiceAccountConfigured(),
+					spreadsheetConfigured: Boolean(sheetsOwner?.reportSpreadsheetId),
+				}
+				: null,
 		});
 	} catch (error) {
-		if (isAuthError(error)) return authError(error);
-
-		console.error("GET_REPORTS_ERROR", error);
-		return NextResponse.json(
-			{ success: false, message: "Gagal mengambil data laporan." },
-			{ status: 500 },
-		);
+		return handleRouteError(error, {
+			context: "GET_REPORTS_ERROR",
+			fallback: "Gagal mengambil data laporan.",
+		});
 	}
 }

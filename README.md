@@ -172,7 +172,7 @@ Silakan gunakan akun bawaan hasil seed:
 
 Sesi berlaku **7 hari** (cookie `siaga_session`). Klik **Keluar** di sidebar untuk logout.
 
-Konfigurasi integrasi Google Sheets memakai environment variable `GOOGLE_SPREADSHEET_ID` dan `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`. Service account harus memiliki akses Editor pada spreadsheet tujuan. Kredensial hanya dipakai di server dan tidak dikirim ke browser.
+Integrasi Google Sheets: server cukup punya `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` (kredensial service account, diisi sekali). Spreadsheet tujuan diatur **per akun** Super Admin/Manager di **Pengaturan → Ekspor Google Sheets**: tempel URL spreadsheet, lalu bagikan spreadsheet itu ke email service account yang ditampilkan dengan peran Editor. Akses tulis diuji saat menyimpan. Setiap ekspor membuat tab baru. Kredensial hanya dipakai di server dan tidak dikirim ke browser. `GOOGLE_SPREADSHEET_ID` tidak dipakai lagi.
 
 ### 3. Dashboard — `/dashboard`
 
