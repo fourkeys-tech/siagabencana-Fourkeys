@@ -31,7 +31,7 @@ interface LogisticsItem {
 	status: string;
 	notes: string | null;
 }
-interface Camp { id: string; name: string; }
+interface Camp { id: string; name: string; status: string; }
 type FormState = { campId: string; itemName: string; quantity: string; unit: string; baseUnit: string; unitDimension: string; conversionFactor: string; minimumQuantity: string; conversionNote: string; notes: string };
 
 const emptyForm: FormState = { campId: "", itemName: "", quantity: "", unit: "", baseUnit: "", unitDimension: "COUNT", conversionFactor: "", minimumQuantity: "", conversionNote: "", notes: "" };
@@ -77,9 +77,9 @@ export default function LogisticsPage() {
 
 	useEffect(() => {
 		void loadData();
-		fetch("/api/public/camps")
+		fetch("/api/camps", { cache: "no-store" })
 			.then((res) => res.json())
-			.then((data) => { if (data.success) setCamps(data.data); })
+			.then((data) => { if (data.success) setCamps((data.data as Camp[]).filter((camp) => camp.status === "ACTIVE")); })
 			.catch(() => undefined);
 	}, [loadData]);
 

@@ -28,6 +28,7 @@ interface Evacuee {
 interface Camp {
 	id: string;
 	name: string;
+	status: string;
 }
 
 interface PaginatedData {
@@ -114,11 +115,11 @@ export default function EvacueesPage() {
 	}, [query, loadData]);
 
 	useEffect(() => {
-		fetch("/api/public/camps")
+		fetch("/api/camps", { cache: "no-store" })
 			.then((res) => res.json())
 			.then((data) => {
 				if (data.success) {
-					setCamps(data.data);
+					setCamps((data.data as Camp[]).filter((camp) => camp.status === "ACTIVE"));
 				}
 			})
 			.catch(() => {});

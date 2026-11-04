@@ -22,6 +22,7 @@ interface FacilityReport {
 interface Camp {
 	id: string;
 	name: string;
+	status: string;
 }
 
 type FacilityAction = "START_REPAIR" | "COMPLETE_REPAIR" | "MARK_REPLACEMENT";
@@ -72,9 +73,9 @@ export default function ShelterPage() {
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => void loadData(), 0);
-		fetch("/api/public/camps", { cache: "no-store" })
+		fetch("/api/camps", { cache: "no-store" })
 			.then((res) => res.json())
-			.then((data) => { if (data.success) setCamps(data.data); })
+			.then((data) => { if (data.success) setCamps((data.data as Camp[]).filter((camp) => camp.status === "ACTIVE")); })
 			.catch(() => undefined);
 		return () => window.clearTimeout(timer);
 	}, [loadData]);

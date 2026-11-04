@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export const revalidate = 30;
+// Render per request: `revalidate` (ISR) membekukan snapshot DB saat build. Cache CDN cukup lewat header Cache-Control.
+export const dynamic = "force-dynamic";
 
 function availabilityFor(occupancyPercentage: number) {
 	if (occupancyPercentage >= 100) return "FULL" as const;
