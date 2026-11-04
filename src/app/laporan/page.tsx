@@ -18,7 +18,6 @@ interface ReportData {
 		totalEvacueeFamilies: number;
 		specialNeeds: number;
 		logisticsItems: number;
-		logisticsQuantity: number;
 		criticalLogistics: number;
 		damagedFacilities: number;
 		distributions: number;
@@ -34,7 +33,6 @@ interface ReportData {
 		evacueeRecords: number;
 		evacueeFamilies: number;
 		logisticsItems: number;
-		logisticsQuantity: number;
 		problemLogistics: number;
 		damagedFacilities: number;
 	}>;

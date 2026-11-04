@@ -7,6 +7,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
 import { MAX_NOTE_LENGTH, validateOptionalText } from "@/lib/validation";
 import { convertRequestedToStock, convertToBase, normalizeUnit, type UnitDefinition } from "@/lib/unit-conversion";
+import { domainError } from "@/lib/domain-errors";
 
 const DISTRIBUTION_STATUSES = new Set<string>(Object.values(DistributionStatus));
 
@@ -262,19 +263,9 @@ export async function POST(request: Request) {
             quantity = convertRequestedToStock(requestedQuantity, requestedUnit, definition);
             baseQuantity = convertToBase(quantity, definition);
         } catch (conversionError) {
-            const conversionMessages: Record<string, string> = {
-                UNIT_CONVERSION_NOT_SUPPORTED: "Unit permintaan tidak memiliki definisi konversi yang aman.",
-                CONVERSION_REQUIRED: "Isi kemasan belum didefinisikan. Lengkapi faktor konversi terlebih dahulu.",
-                CONVERSION_NOT_EXACT: "Jumlah tidak dapat dikonversi tepat ke unit stok.",
-                INVALID_CONVERSION_FACTOR: "Faktor konversi stok tidak valid.",
-                CONVERSION_OVERFLOW: "Hasil konversi terlalu besar.",
-                CONVERSION_DEFINITION_REQUIRED: "Definisi konversi wajib diisi untuk unit berbeda.",
-                BASE_UNIT_DIMENSION_MISMATCH: "Unit dasar stok tidak sesuai dengan dimensi barang.",
-                UNIT_REQUIRED: "Definisi unit stok tidak lengkap.",
-                UNIT_NOT_SUPPORTED: "Unit tidak tersedia di katalog unit.",
-            };
-            const message = conversionError instanceof Error ? conversionMessages[conversionError.message] : null;
-            return NextResponse.json({ success: false, message: message ?? "Konversi unit tidak valid." }, { status: 400 });
+            // Semua error konversi adalah kesalahan input → selalu 400, pesan dari peta domain.
+            const message = domainError(conversionError)?.message ?? "Konversi unit tidak valid.";
+            return NextResponse.json({ success: false, message }, { status: 400 });
         }
         const availableQuantity = sourceItem.quantity - sourceItem.reservedQuantity;
         const availableBaseQuantity = sourceItem.quantityBase - sourceItem.reservedQuantityBase;

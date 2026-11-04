@@ -166,8 +166,8 @@ export async function GET(request: Request) {
 					: 0,
 				evacueeRecords: campEvacuees.length,
 				evacueeFamilies: campEvacuees.reduce((sum, record) => sum + record.totalFamily, 0),
+				// Jumlah lintas unit (kg + dus + pcs) tidak bermakna, jadi hanya jumlah jenis barang yang dilaporkan.
 				logisticsItems: campLogistics.length,
-				logisticsQuantity: campLogistics.reduce((sum, item) => sum + item.quantity, 0),
 				problemLogistics: campLogistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
 				damagedFacilities: campFacilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
 			};
@@ -191,7 +191,6 @@ export async function GET(request: Request) {
 					totalEvacueeFamilies: evacuees.reduce((sum, record) => sum + record.totalFamily, 0),
 					specialNeeds: evacuees.filter((record) => record.hasSpecialNeeds).length,
 					logisticsItems: logistics.length,
-					logisticsQuantity: logistics.reduce((sum, item) => sum + item.quantity, 0),
 					criticalLogistics: logistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
 					damagedFacilities: facilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
 					distributions: distributions.length,

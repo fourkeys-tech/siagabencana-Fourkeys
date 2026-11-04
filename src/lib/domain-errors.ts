@@ -33,7 +33,9 @@ export const DOMAIN_ERRORS = {
 	BASE_UNIT_DIMENSION_MISMATCH: { status: 400, message: "Unit dasar tidak sesuai dengan dimensi barang." },
 	UNIT_REQUIRED: { status: 400, message: "Unit dan unit dasar wajib diisi." },
 	UNIT_NOT_SUPPORTED: { status: 400, message: "Unit tidak tersedia di katalog unit." },
-	UNIT_LOCKED_BY_STOCK: { status: 409, message: "Definisi unit tidak dapat diubah saat stok, reservasi, atau stok rusak masih tercatat. Gunakan alur rekonsiliasi inventory." },
+	STANDARD_UNIT_MISMATCH: { status: 400, message: "Unit standar memakai definisi resmi (kg = 1000 g, l = 1000 ml, pcs/unit/g/ml = 1) dan tidak dapat diubah." },
+	UNIT_LOCKED_BY_STOCK: { status: 409, message: "Definisi unit tidak dapat diubah saat stok, reservasi, atau stok rusak masih tercatat. Barang kemasan yang belum diverifikasi dapat memakai Verifikasi isi kemasan; selain itu kosongkan saldo melalui pergerakan stok terlebih dahulu." },
+	UNIT_VERIFY_BLOCKED: { status: 409, message: "Isi kemasan tidak dapat diverifikasi saat stok dicadangkan atau masih ada permintaan/distribusi berjalan untuk barang ini. Selesaikan atau batalkan terlebih dahulu." },
 
 	// Posko & pengungsi
 	CAMP_NOT_FOUND: { status: 404, message: "Posko tidak ditemukan." },

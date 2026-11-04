@@ -5,16 +5,8 @@ import { convertBaseToStock, convertToBase, type UnitDefinition } from "@/lib/un
 // Re-export agar import lama dari "@/lib/inventory" tetap berfungsi.
 export { runSerializable, type Transaction };
 type InventoryMovementKind = "RECEIPT" | "DAMAGE" | "LOSS" | "RESTORE" | "DISPOSE" | "RESERVATION" | "RESERVATION_RELEASE" | "DISTRIBUTION_OUT" | "DISTRIBUTION_IN";
-type UnitDimension = "COUNT" | "MASS" | "VOLUME";
-type ConversionStatus = "CONFIGURED" | "NEEDS_REVIEW";
 
-type ItemUnitFields = {
-	unit: string;
-	baseUnit: string;
-	unitDimension: UnitDimension;
-	conversionFactor: number;
-	conversionStatus: ConversionStatus;
-};
+type ItemUnitFields = UnitDefinition;
 
 type StockInput = { logisticsItemId: string; quantity: number; createdById: string; reason?: string };
 type DistributionInput = {
@@ -95,6 +87,7 @@ async function recordMovement(tx: Transaction, input: {
 			campId: input.campId,
 			type: input.type,
 			quantity: input.quantity,
+			unit: input.unitFields.unit,
 			baseQuantity,
 			baseUnit: input.unitFields.baseUnit,
 			unitDimension: input.unitFields.unitDimension,
@@ -386,18 +379,20 @@ export async function receiveDistribution(input: DistributionInput) {
 		`;
 		if (changed !== 1) throw new Error("INVALID_DISTRIBUTION_STATUS");
 		await tx.logisticsRequest.updateMany({ where: { id: distribution.requestId, status: "SHIPPED" }, data: { status: "RECEIVED" } });
-		const targetDefinition = {
+		const targetDefinition: UnitDefinition = {
 			unit: distribution.unit,
 			baseUnit: distribution.baseUnit ?? distribution.unit,
-			unitDimension: distribution.unitDimension ?? "COUNT" as UnitDimension,
+			unitDimension: distribution.unitDimension ?? "COUNT",
 			conversionFactor: distribution.conversionFactor ?? 1,
-			conversionStatus: distribution.conversionStatus ?? "NEEDS_REVIEW" as ConversionStatus,
+			conversionStatus: distribution.conversionStatus ?? "NEEDS_REVIEW",
 		};
 		const targetQuantity = convertBaseToStock(baseQuantity, targetDefinition);
+		// Nama barang dicocokkan tanpa membedakan huruf besar/kecil (sama dengan approve),
+		// supaya "Beras" dan "beras" di posko tujuan tidak pecah jadi dua item.
 		let target = await tx.logisticsItem.findFirst({
 			where: {
 				campId: distribution.destinationCampId,
-				itemName: distribution.itemName,
+				itemName: { equals: distribution.itemName, mode: "insensitive" },
 				unit: distribution.unit,
 				baseUnit: targetDefinition.baseUnit,
 				unitDimension: targetDefinition.unitDimension,

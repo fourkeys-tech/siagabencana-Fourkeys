@@ -8,22 +8,14 @@ import { refreshOperationalStatus } from "@/lib/inventory";
 import { runSerializable } from "@/lib/transaction";
 import { readJson } from "@/lib/http";
 import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH, validateOptionalText, validateText } from "@/lib/validation";
-import { assertUnitDefinition, convertToBase, defaultUnitDefinition, inferDimension, inferBaseUnit, normalizeUnit, type UnitConversionStatus, type UnitDimension } from "@/lib/unit-conversion";
+import { convertToBase, multiplyToBase, normalizeUnit, resolveUnitDefinition, type UnitDefinition } from "@/lib/unit-conversion";
 
 type Params = {
     params: Promise<{ id: string }>;
 };
 
-type ItemUnitState = {
-    unit: string;
-    baseUnit: string;
-    unitDimension: UnitDimension;
-    conversionFactor: number;
-    conversionStatus: UnitConversionStatus;
-    minimumQuantity: number;
-};
-
-const UNIT_FIELDS = ["unit", "baseUnit", "unitDimension", "conversionFactor", "conversionStatus"] as const;
+// conversionStatus sengaja tidak diterima: status selalu diturunkan dari unit + faktor.
+const UNIT_FIELDS = ["unit", "baseUnit", "unitDimension", "conversionFactor"] as const;
 const STOCK_FIELDS = ["quantity", "status", "reservedQuantity", "damagedQuantity", "quantityBase", "reservedQuantityBase", "damagedQuantityBase"];
 
 async function getItem(id: string) {
@@ -33,36 +25,14 @@ async function getItem(id: string) {
     });
 }
 
-// Definisi unit baru dari body, dengan nilai item saat ini sebagai default.
-function resolveUnitUpdate(body: Record<string, unknown>, item: ItemUnitState) {
-    const hasUnitChange = UNIT_FIELDS.some((field) => body[field] !== undefined);
-    const minimumQuantity = body.minimumQuantity === undefined ? item.minimumQuantity : Number(body.minimumQuantity);
-    const unit = normalizeUnit(body.unit ?? item.unit);
-    const inferred = defaultUnitDefinition(unit);
-    const baseUnit = normalizeUnit(body.baseUnit ?? (body.unit === undefined ? item.baseUnit : inferred.baseUnit ?? inferBaseUnit(unit)));
-    const unitDimension = (body.unitDimension === "MASS" || body.unitDimension === "VOLUME" || body.unitDimension === "COUNT")
-        ? body.unitDimension as UnitDimension
-        : (body.unit === undefined ? item.unitDimension : inferred.unitDimension ?? inferDimension(baseUnit));
-    const conversionFactor = Number(body.conversionFactor ?? (body.unit === undefined ? item.conversionFactor : inferred.conversionFactor));
-    const conversionStatus: UnitConversionStatus = body.conversionStatus === "NEEDS_REVIEW"
-        ? "NEEDS_REVIEW"
-        : body.conversionStatus === "CONFIGURED" || (hasUnitChange && inferred.conversionStatus === "CONFIGURED")
-            ? "CONFIGURED"
-            : (hasUnitChange ? "NEEDS_REVIEW" : item.conversionStatus);
-    const unitDefinition = assertUnitDefinition({ unit, baseUnit, unitDimension, conversionFactor, conversionStatus });
-    const definitionChanged = hasUnitChange && (
-        unitDefinition.unit !== item.unit
-        || unitDefinition.baseUnit !== item.baseUnit
-        || unitDefinition.unitDimension !== item.unitDimension
-        || unitDefinition.conversionFactor !== item.conversionFactor
-        || unitDefinition.conversionStatus !== item.conversionStatus
-    );
-    return {
-        unitDefinition,
-        definitionChanged,
-        minimumQuantity,
-        minimumQuantityBase: minimumQuantity === 0 ? 0 : convertToBase(minimumQuantity, unitDefinition),
-    };
+// Dinormalisasi supaya barang lama dengan nama alias (mis. "kardus") dibandingkan sebagai "dus".
+function itemDefinition(item: UnitDefinition): UnitDefinition {
+    return { unit: normalizeUnit(item.unit), baseUnit: normalizeUnit(item.baseUnit), unitDimension: item.unitDimension, conversionFactor: item.conversionFactor, conversionStatus: item.conversionStatus };
+}
+
+function sameDefinition(a: UnitDefinition, b: UnitDefinition) {
+    return a.unit === b.unit && a.baseUnit === b.baseUnit && a.unitDimension === b.unitDimension
+        && a.conversionFactor === b.conversionFactor && a.conversionStatus === b.conversionStatus;
 }
 
 export async function GET(
@@ -149,49 +119,84 @@ export async function PUT(
             }
         }
 
+        const hasUnitInput = UNIT_FIELDS.some((field) => body[field] !== undefined);
+
         // Saldo dibaca ulang di dalam transaksi: guard "unit terkunci saat ada stok" dan
-        // quantityBase baru harus memakai saldo yang sama dengan yang di-commit.
-        const { updated, minimumQuantity } = await runSerializable(async (tx) => {
+        // kolom dasar baru harus memakai saldo yang sama dengan yang di-commit.
+        const { updated, minimumQuantity, verification } = await runSerializable(async (tx) => {
             const item = await tx.logisticsItem.findUnique({ where: { id } });
             if (!item) throw new Error("LOGISTICS_ITEM_NOT_FOUND");
             await assertCampActive(item.campId, tx);
 
-            const next = resolveUnitUpdate(body, item);
+            const current = itemDefinition(item);
+            const next = hasUnitInput ? resolveUnitDefinition(body, current) : current;
+            const definitionChanged = !sameDefinition(next, current);
             const hasStock = item.quantity > 0 || item.reservedQuantity > 0 || item.damagedQuantity > 0
                 || item.quantityBase > 0 || item.reservedQuantityBase > 0 || item.damagedQuantityBase > 0;
-            if (next.definitionChanged && hasStock) throw new Error("UNIT_LOCKED_BY_STOCK");
+            // Verifikasi isi kemasan: barang yang dicatat per kemasan (NEEDS_REVIEW) mendapat faktor resmi
+            // tanpa mengganti unitnya, sehingga saldo yang ada cukup dikalikan ulang ke unit dasar.
+            const isVerification = definitionChanged && item.conversionStatus === "NEEDS_REVIEW"
+                && next.conversionStatus === "CONFIGURED" && next.unit === current.unit;
 
-            const factor = next.unitDefinition.conversionFactor;
+            if (definitionChanged && hasStock && !isVerification) throw new Error("UNIT_LOCKED_BY_STOCK");
+            if (isVerification) {
+                // Reservasi & permintaan menyimpan snapshot definisi lama; mengubahnya akan membuat
+                // kolom dasar distribusi tidak cocok dengan stok.
+                const [activeDistributions, pendingRequests] = await Promise.all([
+                    tx.distribution.count({ where: { sourceItemId: id, status: { in: ["APPROVED", "RESERVED"] } } }),
+                    tx.logisticsRequest.count({ where: { sourceCampId: item.campId, status: "PENDING", unit: item.unit, itemName: { equals: item.itemName, mode: "insensitive" } } }),
+                ]);
+                if (item.reservedQuantity > 0 || item.reservedQuantityBase > 0 || activeDistributions > 0 || pendingRequests > 0) {
+                    throw new Error("UNIT_VERIFY_BLOCKED");
+                }
+            }
+
+            const minimum = body.minimumQuantity === undefined ? item.minimumQuantity : Number(body.minimumQuantity);
+            const factor = next.conversionFactor;
             await tx.logisticsItem.update({
                 where: { id },
                 data: {
                     ...(body.itemName !== undefined && { itemName: String(body.itemName).trim() }),
-                    ...(body.unit !== undefined && { unit: next.unitDefinition.unit }),
-                    ...(next.definitionChanged && {
-                        baseUnit: next.unitDefinition.baseUnit,
-                        unitDimension: next.unitDefinition.unitDimension,
+                    ...(definitionChanged && {
+                        unit: next.unit,
+                        baseUnit: next.baseUnit,
+                        unitDimension: next.unitDimension,
                         conversionFactor: factor,
-                        conversionStatus: next.unitDefinition.conversionStatus,
-                        quantityBase: item.quantity * factor,
-                        reservedQuantityBase: item.reservedQuantity * factor,
-                        damagedQuantityBase: item.damagedQuantity * factor,
+                        conversionStatus: next.conversionStatus,
+                        quantityBase: multiplyToBase(item.quantity, factor),
+                        reservedQuantityBase: multiplyToBase(item.reservedQuantity, factor),
+                        damagedQuantityBase: multiplyToBase(item.damagedQuantity, factor),
                     }),
                     ...(body.conversionNote !== undefined && { conversionNote: String(body.conversionNote ?? "").trim() || null }),
-                    minimumQuantity: next.minimumQuantity,
-                    minimumQuantityBase: next.minimumQuantityBase,
+                    minimumQuantity: minimum,
+                    minimumQuantityBase: minimum === 0 ? 0 : convertToBase(minimum, next),
                     ...(body.notes !== undefined && { notes: body.notes ? String(body.notes).trim() : null }),
                 },
             });
             // Status operasional (CRITICAL/LOW/SUFFICIENT) langsung sinkron dengan batas minimum baru.
             await refreshOperationalStatus(tx, id);
-            return { updated: await tx.logisticsItem.findUniqueOrThrow({ where: { id } }), minimumQuantity: next.minimumQuantity };
+            return {
+                updated: await tx.logisticsItem.findUniqueOrThrow({ where: { id } }),
+                minimumQuantity: minimum,
+                verification: isVerification ? { oldUnit: item.unit, oldBaseUnit: item.baseUnit, oldFactor: item.conversionFactor } : null,
+            };
         });
 
-        await writeAuditLog({ userId: user.id, action: "UPDATE", entity: "LogisticsItem", entityId: id, details: { itemName: updated.itemName, unit: updated.unit, minimumQuantity } });
+        if (verification) {
+            await writeAuditLog({
+                userId: user.id,
+                action: "UNIT_VERIFY",
+                entity: "LogisticsItem",
+                entityId: id,
+                details: { itemName: updated.itemName, unit: updated.unit, oldUnit: verification.oldUnit, oldBaseUnit: verification.oldBaseUnit, oldFactor: verification.oldFactor, newBaseUnit: updated.baseUnit, newFactor: updated.conversionFactor, quantityBase: updated.quantityBase },
+            });
+        } else {
+            await writeAuditLog({ userId: user.id, action: "UPDATE", entity: "LogisticsItem", entityId: id, details: { itemName: updated.itemName, unit: updated.unit, minimumQuantity } });
+        }
 
         return NextResponse.json({
             success: true,
-            message: "Data logistik berhasil diperbarui.",
+            message: verification ? "Isi kemasan terverifikasi dan saldo dasar dihitung ulang." : "Data logistik berhasil diperbarui.",
             data: updated,
         });
     } catch (error) {

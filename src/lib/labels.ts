@@ -45,6 +45,13 @@ const LABELS: Record<string, string> = {
 	DISTRIBUTION_OUT: "Distribusi Keluar",
 	DISTRIBUTION_IN: "Distribusi Masuk",
 
+	// Unit
+	COUNT: "Jumlah",
+	MASS: "Massa",
+	VOLUME: "Volume",
+	CONFIGURED: "Terverifikasi",
+	NEEDS_REVIEW: "Perlu verifikasi",
+
 	// Availability
 	AVAILABLE: "Tersedia",
 	LIMITED: "Terbatas",
@@ -56,6 +63,7 @@ const LABELS: Record<string, string> = {
 	STOCK_LOSS: "Pencatatan Hilang",
 	STOCK_RESTORE: "Pemulihan Stok",
 	STOCK_DISPOSE: "Pemusnahan Stok",
+	UNIT_VERIFY: "Verifikasi Isi Kemasan",
 	FACILITY_REPORT_DAMAGE: "Lapor Fasilitas Rusak",
 	FACILITY_START_REPAIR: "Mulai Perbaikan",
 	FACILITY_COMPLETE_REPAIR: "Selesai Perbaikan",

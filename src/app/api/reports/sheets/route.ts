@@ -5,6 +5,7 @@ import { writeReportToGoogleSheet, type ReportSheetRow } from "@/lib/google-shee
 import { writeAuditLog } from "@/lib/audit";
 import { handleRouteError } from "@/lib/api-errors";
 import { readJson } from "@/lib/http";
+import { enumLabel } from "@/lib/labels";
 
 function parseDate(value: string | null, endOfDay = false) {
 	if (!value) return null;
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
 			[],
 			["STATUS POSKO"],
 			["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi"],
-			...camps.map((camp) => [camp.name, camp.status, camp.maxCapacity, camp.currentOccupants, camp.maxCapacity > 0 ? `${((camp.currentOccupants / camp.maxCapacity) * 100).toFixed(2)}%` : "0%"]),
+			...camps.map((camp) => [camp.name, enumLabel(camp.status), camp.maxCapacity, camp.currentOccupants, camp.maxCapacity > 0 ? `${((camp.currentOccupants / camp.maxCapacity) * 100).toFixed(2)}%` : "0%"]),
 			[],
 			["PENGUNGSI"],
 			["Nama", "Posko", "Jumlah Keluarga", "Kebutuhan Khusus", "Tiba", "Keluar"],
@@ -73,15 +74,15 @@ export async function POST(request: Request) {
 			[],
 			["LOGISTIK"],
 			["Barang", "Posko", "Jumlah", "Unit", "Saldo dasar", "Unit dasar", "Status konversi", "Status"],
-			...logistics.map((item) => [item.itemName, item.camp.name, item.quantity, item.unit, item.quantityBase, item.baseUnit, item.conversionStatus, item.status]),
+			...logistics.map((item) => [item.itemName, item.camp.name, item.quantity, item.unit, item.quantityBase, item.baseUnit, enumLabel(item.conversionStatus), enumLabel(item.status)]),
 			[],
 			["FASILITAS"],
 			["Fasilitas", "Posko", "Status", "Deskripsi", "Tanggal"],
-			...facilities.map((facility) => [facility.facilityName, facility.camp.name, facility.status, facility.description, facility.createdAt.toISOString()]),
+			...facilities.map((facility) => [facility.facilityName, facility.camp.name, enumLabel(facility.status), facility.description, facility.createdAt.toISOString()]),
 			[],
 			["DISTRIBUSI"],
 			["Barang", "Asal", "Tujuan", "Jumlah", "Unit", "Jumlah dasar", "Unit dasar", "Status konversi", "Status", "Tanggal"],
-			...distributions.map((distribution) => [distribution.itemName, distribution.sourceCamp.name, distribution.destinationCamp.name, distribution.requestedQuantity ?? distribution.quantity, distribution.requestedUnit ?? distribution.unit, distribution.baseQuantity ?? "-", distribution.baseUnit ?? "-", distribution.conversionStatus ?? "-", distribution.status, distribution.createdAt.toISOString()]),
+			...distributions.map((distribution) => [distribution.itemName, distribution.sourceCamp.name, distribution.destinationCamp.name, distribution.requestedQuantity ?? distribution.quantity, distribution.requestedUnit ?? distribution.unit, distribution.baseQuantity ?? "-", distribution.baseUnit ?? "-", enumLabel(distribution.conversionStatus, "-"), enumLabel(distribution.status), distribution.createdAt.toISOString()]),
 		];
 
 		const sectionRows: number[] = [];

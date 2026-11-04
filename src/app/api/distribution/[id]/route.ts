@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authError, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { requireAuth } from "@/lib/auth/guard";
 import { canManageRequest, canReceiveDistribution, canReviewRequest, canWithdrawRequest, hasDistributionAccess, isPositiveInteger } from "@/lib/distribution";
 import { approveAndReserveDistribution, receiveDistribution, releaseReservation, shipStock } from "@/lib/inventory";
 import { writeAuditLog } from "@/lib/audit";
-import { isSerializationConflict, SERIALIZATION_CONFLICT_MESSAGE } from "@/lib/prisma-errors";
-import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { handleRouteError } from "@/lib/api-errors";
+import { readJson } from "@/lib/http";
 import { MAX_NOTE_LENGTH, validateOptionalText, validateText } from "@/lib/validation";
 
 type Params = { params: Promise<{ id: string }> };
@@ -47,34 +47,6 @@ async function getDistribution(id: string) {
 	} });
 }
 
-function inventoryError(error: unknown) {
-	if (!(error instanceof Error)) return null;
-	const errors: Record<string, { status: number; message: string }> = {
-		INVALID_QUANTITY: { status: 400, message: "Jumlah distribusi tidak valid." },
-		DISTRIBUTION_NOT_FOUND: { status: 404, message: "Distribusi tidak ditemukan." },
-		DISTRIBUTION_REQUEST_NOT_FOUND: { status: 404, message: "Permintaan distribusi tidak ditemukan." },
-		INVALID_DISTRIBUTION_STATUS: { status: 409, message: "Status distribusi sudah berubah atau aksi tidak sesuai alur." },
-		INVALID_REQUEST_STATUS: { status: 409, message: "Permintaan sudah diproses." },
-		SOURCE_STOCK_NOT_FOUND: { status: 409, message: "Stok sumber tidak tersedia." },
-		SOURCE_STOCK_MISMATCH: { status: 400, message: "Barang sumber tidak cocok dengan permintaan atau sedang rusak." },
-		INSUFFICIENT_AVAILABLE_STOCK: { status: 409, message: "Stok tersedia tidak mencukupi." },
-		RESERVATION_NOT_FOUND: { status: 409, message: "Reservasi stok tidak ditemukan." },
-		QUANTITY_EXCEEDS_REQUEST: { status: 400, message: "Jumlah distribusi melebihi permintaan." },
-		CONVERSION_REQUIRED: { status: 400, message: "Isi kemasan belum didefinisikan. Lengkapi faktor konversi terlebih dahulu." },
-		CONVERSION_NOT_EXACT: { status: 400, message: "Jumlah tidak dapat dikonversi tepat ke unit stok." },
-		CONVERSION_OVERFLOW: { status: 400, message: "Hasil konversi terlalu besar." },
-		CONVERSION_DEFINITION_REQUIRED: { status: 400, message: "Definisi konversi wajib diisi untuk unit berbeda." },
-		INVALID_CONVERSION_FACTOR: { status: 400, message: "Faktor konversi stok tidak valid." },
-		UNIT_CONVERSION_NOT_SUPPORTED: { status: 400, message: "Unit permintaan tidak memiliki definisi konversi yang aman." },
-		BASE_UNIT_DIMENSION_MISMATCH: { status: 400, message: "Unit dasar stok tidak sesuai dengan dimensi barang." },
-		UNIT_REQUIRED: { status: 400, message: "Definisi unit stok tidak lengkap." },
-		UNIT_NOT_SUPPORTED: { status: 400, message: "Unit tidak tersedia di katalog unit." },
-		CAMP_NOT_ACTIVE: { status: 409, message: "Posko sudah ditutup sehingga tidak dapat memproses distribusi." },
-		P2034_EXHAUSTED: { status: 409, message: SERIALIZATION_CONFLICT_MESSAGE },
-	};
-	return errors[error.message] ?? null;
-}
-
 export async function GET(_request: Request, { params }: Params) {
 	try {
 		const user = await requireAuth();
@@ -89,9 +61,7 @@ export async function GET(_request: Request, { params }: Params) {
 		if (!canManageRequest(user, logisticsRequest.sourceCampId, logisticsRequest.destinationCampId)) return NextResponse.json({ success: false, message: "Tidak memiliki akses ke permintaan ini." }, { status: 403 });
 		return NextResponse.json({ success: true, data: logisticsRequest });
 	} catch (error) {
-		if (isAuthError(error)) return authError(error);
-		console.error("GET_DISTRIBUTION_DETAIL_ERROR", error);
-		return NextResponse.json({ success: false, message: "Gagal mengambil data distribusi." }, { status: 500 });
+		return handleRouteError(error, { context: "GET_DISTRIBUTION_DETAIL_ERROR", fallback: "Gagal mengambil data distribusi." });
 	}
 }
 
@@ -184,12 +154,13 @@ export async function PUT(request: Request, { params }: Params) {
 		await writeAuditLog({ userId: user.id, action: "APPROVE", entity: "LogisticsRequest", entityId: id, details: { itemName: logisticsRequest.itemName, sourceItemId, quantity } });
 		return NextResponse.json({ success: true, message: "Permintaan disetujui dan stok berhasil direservasi.", data: result });
 	} catch (error) {
-		if (isInvalidJson(error)) return invalidJsonResponse();
-		if (isSerializationConflict(error)) return NextResponse.json({ success: false, message: SERIALIZATION_CONFLICT_MESSAGE }, { status: 409 });
-		const known = inventoryError(error);
-		if (known) return NextResponse.json({ success: false, message: known.message }, { status: known.status });
-		if (isAuthError(error)) return authError(error);
-		console.error("UPDATE_DISTRIBUTION_ERROR", error);
-		return NextResponse.json({ success: false, message: "Gagal memperbarui distribusi." }, { status: 500 });
+		return handleRouteError(error, {
+			context: "UPDATE_DISTRIBUTION_ERROR",
+			fallback: "Gagal memperbarui distribusi.",
+			messages: {
+				INVALID_QUANTITY: "Jumlah distribusi tidak valid.",
+				CAMP_NOT_ACTIVE: "Posko sudah ditutup sehingga tidak dapat memproses distribusi.",
+			},
+		});
 	}
 }

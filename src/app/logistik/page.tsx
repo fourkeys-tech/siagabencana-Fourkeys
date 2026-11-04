@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { Modal } from "@/components/ui/modal";
 import { useSession } from "@/components/auth/user-provider";
+import { baseUnitsForDimension, DIMENSION_OPTIONS, isStandardUnit, isUnitDimension, UNIT_OPTIONS, unitDefaults } from "@/lib/unit-conversion";
 
 interface LogisticsItem {
 	id: string;
@@ -34,17 +35,11 @@ interface Camp { id: string; name: string; }
 type FormState = { campId: string; itemName: string; quantity: string; unit: string; baseUnit: string; unitDimension: string; conversionFactor: string; minimumQuantity: string; conversionNote: string; notes: string };
 
 const emptyForm: FormState = { campId: "", itemName: "", quantity: "", unit: "", baseUnit: "", unitDimension: "COUNT", conversionFactor: "", minimumQuantity: "", conversionNote: "", notes: "" };
-const unitOptions = [{ value: "", label: "Pilih unit" }, { value: "pcs", label: "pcs (buah)" }, { value: "unit", label: "unit (peralatan)" }, { value: "g", label: "g" }, { value: "kg", label: "kg" }, { value: "ml", label: "ml" }, { value: "l", label: "l" }, { value: "dus", label: "dus (isi perlu didefinisikan)" }, { value: "box", label: "box (isi perlu didefinisikan)" }, { value: "paket", label: "paket (isi perlu didefinisikan)" }, { value: "karton", label: "karton (isi perlu didefinisikan)" }];
-const baseUnitOptions = [{ value: "", label: "Pilih unit dasar" }, { value: "pcs", label: "pcs" }, { value: "unit", label: "unit" }, { value: "g", label: "g (massa)" }, { value: "ml", label: "ml (volume)" }];
+const unitSelectOptions = [{ value: "", label: "Pilih unit" }, ...UNIT_OPTIONS];
+const dimensionSelectOptions = [...DIMENSION_OPTIONS];
 
-function unitDefaults(unit: string) {
-	if (unit === "kg") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: "1000" };
-	if (unit === "g") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: "1" };
-	if (unit === "l") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: "1000" };
-	if (unit === "ml") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: "1" };
-	if (unit === "unit") return { baseUnit: "unit", unitDimension: "COUNT", conversionFactor: "1" };
-	if (unit === "pcs") return { baseUnit: "pcs", unitDimension: "COUNT", conversionFactor: "1" };
-	return { baseUnit: "pcs", unitDimension: "COUNT", conversionFactor: "" };
+function baseUnitSelectOptions(dimension: string) {
+	return (isUnitDimension(dimension) ? baseUnitsForDimension(dimension) : []).map((unit) => ({ value: unit, label: unit }));
 }
 
 export default function LogisticsPage() {
@@ -89,6 +84,12 @@ export default function LogisticsPage() {
 	}, [loadData]);
 
 	const selectUnit = (unit: string) => setFormData((current) => ({ ...current, unit, ...unitDefaults(unit) }));
+	const selectDimension = (unitDimension: string) => setFormData((current) => ({
+		...current,
+		unitDimension,
+		baseUnit: isUnitDimension(unitDimension) ? (baseUnitsForDimension(unitDimension)[0] ?? "") : "",
+	}));
+	const standardUnitSelected = isStandardUnit(formData.unit);
 
 	const openCreateModal = () => {
 		setModalError("");
@@ -112,12 +113,21 @@ export default function LogisticsPage() {
 			const res = await fetch("/api/logistics", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
+				// Unit standar cukup dikirim namanya (definisi resmi diterapkan server). Unit kemasan
+				// tanpa isi dikirim tanpa faktor → dicatat per kemasan (perlu verifikasi).
 				body: JSON.stringify({
-					...formData,
 					campId: campIdToUse,
+					itemName: formData.itemName,
 					quantity: Number(formData.quantity),
 					minimumQuantity: Number(formData.minimumQuantity || 0),
-					conversionFactor: formData.conversionFactor ? Number(formData.conversionFactor) : undefined,
+					unit: formData.unit,
+					...(!standardUnitSelected && {
+						baseUnit: formData.baseUnit,
+						unitDimension: formData.unitDimension,
+						conversionFactor: formData.conversionFactor.trim() ? Number(formData.conversionFactor) : undefined,
+					}),
+					conversionNote: formData.conversionNote,
+					notes: formData.notes,
 				}),
 			});
 			const data = await res.json();
@@ -208,8 +218,8 @@ export default function LogisticsPage() {
 										<td className="px-5 py-4 text-sm text-rose-700">{item.damagedQuantity} {item.unit}</td>
 										<td className="px-5 py-4 text-sm text-slate-600">
 											{item.quantityBase} {item.baseUnit}
-											<p className="text-xs text-slate-400">1 {item.unit} = {item.conversionFactor} {item.baseUnit}</p>
-											{item.conversionStatus === "NEEDS_REVIEW" && <span className="text-xs font-semibold text-amber-700">Isi kemasan belum diverifikasi</span>}
+											{item.unit !== item.baseUnit && <p className="text-xs text-slate-400">1 {item.unit} = {item.conversionFactor} {item.baseUnit}</p>}
+											{item.conversionStatus === "NEEDS_REVIEW" && <span className="block text-xs font-semibold text-amber-700">Isi kemasan belum diverifikasi · dicatat per {item.unit}</span>}
 										</td>
 										<td className="px-5 py-4"><Badge label={item.status} /></td>
 										<td className="px-5 py-4 text-sm text-slate-600">{item.camp?.name}</td>
@@ -332,42 +342,42 @@ export default function LogisticsPage() {
 						label="Unit tampilan"
 						value={formData.unit}
 						onChange={selectUnit}
-						options={unitOptions}
+						options={unitSelectOptions}
 						required
 						disabled={submitting}
 					/>
 					<FormSelect
 						label="Dimensi"
 						value={formData.unitDimension}
-						onChange={(value) => setFormData({ ...formData, unitDimension: value })}
-						options={[
-							{ value: "COUNT", label: "Jumlah (pcs/unit)" },
-							{ value: "MASS", label: "Massa (g/kg)" },
-							{ value: "VOLUME", label: "Volume (ml/l)" },
-						]}
+						onChange={selectDimension}
+						options={dimensionSelectOptions}
 						required
-						disabled={submitting}
+						disabled={submitting || !formData.unit || standardUnitSelected}
 					/>
 					<FormSelect
 						label="Unit dasar kanonik"
 						value={formData.baseUnit}
 						onChange={(value) => setFormData({ ...formData, baseUnit: value })}
-						options={baseUnitOptions}
+						options={baseUnitSelectOptions(formData.unitDimension)}
 						required
-						disabled={submitting}
+						disabled={submitting || !formData.unit || standardUnitSelected}
 					/>
 					<FormField
-						label="Isi per unit tampilan"
+						label={standardUnitSelected ? "Isi per unit tampilan (resmi)" : "Isi per kemasan (opsional)"}
 						type="number"
 						value={formData.conversionFactor}
 						onChange={(value) => setFormData({ ...formData, conversionFactor: value })}
-						min={1}
-						placeholder="Contoh: 24 untuk 1 dus = 24 pcs"
-						required={Boolean(formData.unit && !["pcs", "unit", "g", "kg", "ml", "l"].includes(formData.unit))}
-						disabled={submitting}
+						min={standardUnitSelected ? 1 : 2}
+						placeholder={formData.unit && !standardUnitSelected ? `Contoh: 24 untuk 1 ${formData.unit} = 24 ${formData.baseUnit || "pcs"}` : undefined}
+						readOnly={standardUnitSelected}
+						disabled={submitting || !formData.unit}
 					/>
 					<p className="text-xs text-slate-500">
-						Unit standar otomatis memakai faktor resmi. Unit dus/box/paket wajib memiliki isi terverifikasi; jangan mengisi angka perkiraan.
+						{!formData.unit
+							? "Pilih unit terlebih dahulu."
+							: standardUnitSelected
+								? `Unit standar memakai definisi resmi (1 ${formData.unit} = ${formData.conversionFactor} ${formData.baseUnit}) dan tidak dapat diubah.`
+								: `Isi hanya bila isi kemasan sudah pasti; jangan mengisi angka perkiraan. Bila dikosongkan, stok dicatat per ${formData.unit} dan isi kemasan dapat diverifikasi nanti.`}
 					</p>
 					<FormField
 						label="Catatan definisi konversi"
@@ -412,7 +422,8 @@ export default function LogisticsPage() {
 					<form onSubmit={(event) => { event.preventDefault(); void handleMovement(); }} className="space-y-3">
 						{movementModalError && <Alert type="error">{movementModalError}</Alert>}
 						<p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-							<b>{movementItem.itemName}</b> · tersedia {movementItem.quantity - movementItem.reservedQuantity} {movementItem.unit} · saldo dasar {movementItem.quantityBase - movementItem.reservedQuantityBase} {movementItem.baseUnit}
+							<b>{movementItem.itemName}</b> · tersedia {movementItem.quantity - movementItem.reservedQuantity} {movementItem.unit}
+							{movementItem.baseUnit !== movementItem.unit && <> · saldo dasar {movementItem.quantityBase - movementItem.reservedQuantityBase} {movementItem.baseUnit}</>}
 							{movementAction === "RECEIPT" && movementItem.status === "SPOILED_OR_DAMAGED" ? (
 								<span className="mt-1 block text-xs text-blue-700">Stok pengganti akan dibuat sebagai item terpisah.</span>
 							) : null}

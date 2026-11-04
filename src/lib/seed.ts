@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
+import { defaultUnitDefinition, isPackagingUnit, isStandardUnit } from "./unit-conversion";
 
 dotenv.config();
 
@@ -149,15 +150,23 @@ type SeedUnitMetadata = {
 	conversionNote: string;
 };
 
+// Definisi diambil dari aturan aplikasi (unit-conversion) agar seed tidak menyimpang dari form/API.
 function unitMetadata(unit: string): SeedUnitMetadata {
-	const normalized = unit.trim().toLowerCase();
-	if (normalized === "kg" || normalized === "kilogram") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: 1000, conversionStatus: "CONFIGURED", conversionNote: "Konversi standar 1 kg = 1000 g." };
-	if (normalized === "g" || normalized === "gram" || normalized === "gr") return { baseUnit: "g", unitDimension: "MASS", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar massa." };
-	if (normalized === "l" || normalized === "liter" || normalized === "ltr") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: 1000, conversionStatus: "CONFIGURED", conversionNote: "Konversi standar 1 l = 1000 ml." };
-	if (normalized === "ml" || normalized === "mililiter" || normalized === "milliliter") return { baseUnit: "ml", unitDimension: "VOLUME", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar volume." };
-	if (normalized === "unit") return { baseUnit: "unit", unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar peralatan." };
-	if (normalized === "pcs" || normalized === "pc" || normalized === "buah") return { baseUnit: "pcs", unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "CONFIGURED", conversionNote: "Unit dasar barang hitung." };
-	return { baseUnit: normalized, unitDimension: "COUNT", conversionFactor: 1, conversionStatus: "NEEDS_REVIEW", conversionNote: "Isi kemasan belum didefinisikan; konversi lintas unit diblokir." };
+	const definition = defaultUnitDefinition(unit);
+	if (definition.unit !== unit) throw new Error(`SEED_UNIT_NOT_NORMALIZED_${unit}`);
+	if (!isStandardUnit(unit) && !isPackagingUnit(unit)) throw new Error(`SEED_UNIT_NOT_SUPPORTED_${unit}`);
+	const conversionNote = definition.conversionStatus === "NEEDS_REVIEW"
+		? "Isi kemasan belum didefinisikan; konversi lintas unit diblokir."
+		: definition.unit === definition.baseUnit
+			? `Unit dasar (${definition.unit}).`
+			: `Konversi standar 1 ${definition.unit} = ${definition.conversionFactor} ${definition.baseUnit}.`;
+	return {
+		baseUnit: definition.baseUnit,
+		unitDimension: definition.unitDimension,
+		conversionFactor: definition.conversionFactor,
+		conversionStatus: definition.conversionStatus,
+		conversionNote,
+	};
 }
 
 const divisions: DivisionValue[] = ["LOGISTICS", "SHELTER", "DATA_REGISTRATION"];
@@ -691,8 +700,8 @@ async function upsertDistribution(distribution: DistributionSeed) {
 }
 
 async function upsertMovement(movement: MovementSeed) {
-	const item = await prisma.logisticsItem.findUniqueOrThrow({ where: { id: movement.logisticsItemId }, select: { baseUnit: true, unitDimension: true, conversionFactor: true } });
-	const data = { logisticsItemId: movement.logisticsItemId, campId: movement.campId, type: movement.type, quantity: movement.quantity, baseQuantity: movement.quantity * item.conversionFactor, baseUnit: item.baseUnit, unitDimension: item.unitDimension, conversionFactor: item.conversionFactor, reason: movement.reason, createdById: movement.createdById, distributionId: movement.distributionId, createdAt: movement.createdAt };
+	const item = await prisma.logisticsItem.findUniqueOrThrow({ where: { id: movement.logisticsItemId }, select: { unit: true, baseUnit: true, unitDimension: true, conversionFactor: true } });
+	const data = { logisticsItemId: movement.logisticsItemId, campId: movement.campId, type: movement.type, quantity: movement.quantity, unit: item.unit, baseQuantity: movement.quantity * item.conversionFactor, baseUnit: item.baseUnit, unitDimension: item.unitDimension, conversionFactor: item.conversionFactor, reason: movement.reason, createdById: movement.createdById, distributionId: movement.distributionId, createdAt: movement.createdAt };
 	return prisma.inventoryMovement.upsert({ where: { id: movement.id }, update: data, create: { id: movement.id, ...data } });
 }
 

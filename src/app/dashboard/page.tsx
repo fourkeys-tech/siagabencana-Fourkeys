@@ -101,7 +101,7 @@ function DistributionList({
 			{records.length === 0 ? <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">{emptyMessage}</p> : <div className="space-y-2">
 				{records.map((record) => <div key={record.id} className="rounded-xl border border-slate-100 p-3">
 					<div className="flex items-start justify-between gap-3"><p className="min-w-0 truncate text-sm font-semibold text-slate-900">{record.itemName}</p><Badge label={record.status === "RECEIVED" ? "DITERIMA" : record.status === "SHIPPED" ? "DIKIRIM" : "DISIAPKAN"} /></div>
-					<p className="mt-1 text-xs text-slate-600">{record.quantity} {record.unit}{record.baseQuantity && record.baseUnit ? ` · ${record.baseQuantity} ${record.baseUnit}` : ""} · {distributionRoute(record, campId)}</p>
+					<p className="mt-1 text-xs text-slate-600">{record.quantity} {record.unit}{record.baseQuantity && record.baseUnit && record.baseUnit !== record.unit ? ` · ${record.baseQuantity} ${record.baseUnit}` : ""} · {distributionRoute(record, campId)}</p>
 					<p className="mt-1 text-[11px] text-slate-400">Diperbarui {new Date(record.updatedAt).toLocaleString("id-ID")}</p>
 				</div>)}
 			</div>}

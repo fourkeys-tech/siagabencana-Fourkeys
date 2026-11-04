@@ -37,6 +37,7 @@ interface InventoryMovement {
 	id: string;
 	type: string;
 	quantity: number;
+	unit: string | null;
 	baseQuantity: number | null;
 	baseUnit: string | null;
 	reason: string | null;
@@ -124,6 +125,7 @@ export default function LogisticsDetailPage() {
 	}
 
 	const hasMovements = movementsTotal > 0 || movements.length > 0;
+	const showBase = item.baseUnit !== item.unit;
 
 	return (
 		<div className="space-y-6">
@@ -179,24 +181,31 @@ export default function LogisticsDetailPage() {
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Saldo dasar kanonik</p>
-					<p className="text-gray-900 font-semibold">{item.quantityBase} {item.baseUnit}</p>
+					<p className="text-gray-900 font-semibold">{item.quantityBase} {item.baseUnit}{!showBase && " (sama dengan unit tampilan)"}</p>
 					<p className="text-xs text-gray-500">Tersedia: {Math.max(item.quantityBase - item.reservedQuantityBase, 0)} {item.baseUnit}</p>
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Dicadangkan (Reserved)</p>
-					<p className="text-gray-900">{item.reservedQuantity} {item.unit} · {item.reservedQuantityBase} {item.baseUnit}</p>
+					<p className="text-gray-900">{item.reservedQuantity} {item.unit}{showBase && ` · ${item.reservedQuantityBase} ${item.baseUnit}`}</p>
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Rusak / Kedaluwarsa</p>
-					<p className="text-gray-900">{item.damagedQuantity} {item.unit} · {item.damagedQuantityBase} {item.baseUnit}</p>
+					<p className="text-gray-900">{item.damagedQuantity} {item.unit}{showBase && ` · ${item.damagedQuantityBase} ${item.baseUnit}`}</p>
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Definisi Satuan</p>
-					<p className="text-gray-900">1 {item.unit} = {item.conversionFactor} {item.baseUnit}</p>
-					<p className="text-xs text-gray-500">Dimensi: {item.unitDimension}</p>
-					{item.conversionStatus === "NEEDS_REVIEW" && (
-						<p className="mt-1 text-xs font-semibold text-amber-700">Perlu verifikasi isi kemasan</p>
+					{item.conversionStatus === "NEEDS_REVIEW" ? (
+						<>
+							<p className="text-gray-900">Dicatat per {item.unit} (isi kemasan belum diverifikasi)</p>
+							<p className="mt-1 text-xs font-semibold text-amber-700">
+								Konversi ke unit lain diblokir sampai isi kemasan diverifikasi.{" "}
+								<Link href={`/logistik/${item.id}/edit`} className="underline">Verifikasi isi kemasan</Link>
+							</p>
+						</>
+					) : (
+						<p className="text-gray-900">{showBase ? `1 ${item.unit} = ${item.conversionFactor} ${item.baseUnit}` : `Unit dasar (${item.unit})`}</p>
 					)}
+					<p className="text-xs text-gray-500">Dimensi: {enumLabel(item.unitDimension)}</p>
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Status Operasional</p>
@@ -250,9 +259,18 @@ export default function LogisticsDetailPage() {
 											</span>
 										</td>
 										<td className="whitespace-nowrap px-5 py-3.5 text-sm font-medium text-gray-900">
-											{m.quantity} {item.unit}
-											{m.baseQuantity !== null && m.baseUnit && m.baseUnit !== item.unit && (
-												<span className="ml-1 text-xs text-gray-500">({m.baseQuantity} {m.baseUnit})</span>
+											{m.unit ? (
+												<>
+													{m.quantity} {m.unit}
+													{m.baseQuantity !== null && m.baseUnit && m.baseUnit !== m.unit && (
+														<span className="ml-1 text-xs text-gray-500">({m.baseQuantity} {m.baseUnit})</span>
+													)}
+												</>
+											) : m.baseQuantity !== null && m.baseUnit ? (
+												// Baris lama yang unit tampilannya tidak dapat dipastikan: tampilkan saldo dasar saja.
+												<>{m.baseQuantity} {m.baseUnit}</>
+											) : (
+												<>{m.quantity} {item.unit}</>
 											)}
 										</td>
 										<td className="px-5 py-3.5 text-sm text-gray-600 max-w-xs truncate">

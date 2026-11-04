@@ -186,6 +186,8 @@ model InventoryMovement {
   campId          String
   type            InventoryMovementType
   quantity        Int
+  /// Unit tampilan saat mutasi dicatat (snapshot; unit item bisa berubah setelah saldo kosong).
+  unit            String?
   baseQuantity    Int?
   baseUnit        String?
   unitDimension   UnitDimension?
