@@ -62,6 +62,7 @@ type Logistics = {
 
 type Facility = {
 	id: string;
+	category?: string;
 	facilityName: string;
 	status: string;
 };
@@ -217,8 +218,8 @@ async function copyText(text: string) {
 	}
 }
 
-function FacilityIcon({ name, className = "h-3.5 w-3.5 shrink-0" }: { name: string; className?: string }) {
-	switch (facilityKind(name)) {
+function FacilityIcon({ name, category, className = "h-3.5 w-3.5 shrink-0" }: { name: string; category?: string; className?: string }) {
+	switch (facilityKind(name, category)) {
 		case "TOILET":
 			return <Toilet className={className} aria-hidden="true" />;
 		case "WATER":
@@ -1009,7 +1010,7 @@ export default function PublicPage({
 																key={facility.id}
 																className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium ${statusBadgeClass(facility.status)}`}
 															>
-																<FacilityIcon name={facility.facilityName} />
+																<FacilityIcon name={facility.facilityName} category={facility.category} />
 																{facility.facilityName}: {statusLabels[facility.status] ?? facility.status}
 															</span>
 														))}
@@ -1277,7 +1278,7 @@ export default function PublicPage({
 																				key={facility.id}
 																				className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium ${statusBadgeClass(facility.status)}`}
 																			>
-																				<FacilityIcon name={facility.facilityName} />
+																				<FacilityIcon name={facility.facilityName} category={facility.category} />
 																				<span>{facility.facilityName}</span>
 																				<span className="opacity-75">({statusLabels[facility.status] ?? facility.status})</span>
 																			</span>
@@ -1435,7 +1436,7 @@ export default function PublicPage({
 										<div key={facility.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3 shadow-xs">
 											<div className="flex min-w-0 items-center gap-2.5">
 												<div className="rounded-lg bg-blue-50 p-2 text-blue-700">
-													<FacilityIcon name={facility.facilityName} className="h-4 w-4" />
+													<FacilityIcon name={facility.facilityName} category={facility.category} className="h-4 w-4" />
 												</div>
 												<p className="text-xs font-bold text-slate-900 sm:text-sm">{facility.facilityName}</p>
 											</div>

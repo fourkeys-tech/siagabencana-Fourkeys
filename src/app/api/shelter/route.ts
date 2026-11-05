@@ -1,18 +1,22 @@
-import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { authError, canManageDivision, isAuthError, requireAuth } from "@/lib/auth/guard";
+import { canManageDivision, requireAuth } from "@/lib/auth/guard";
 import { writeAuditLog } from "@/lib/audit";
-import { assertCampActive, campError } from "@/lib/camps";
-import { invalidJsonResponse, isInvalidJson, readJson } from "@/lib/http";
+import { handleRouteError } from "@/lib/api-errors";
+import { fail, ok } from "@/lib/api-response";
+import { assertCampActive } from "@/lib/camps";
+import { readJson } from "@/lib/http";
 import { paginatedResponse, parsePagination } from "@/lib/pagination";
+import { parseFacilityCategory, parseFacilityQuantity } from "@/lib/shelter-standards";
 import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH, validateText } from "@/lib/validation";
+
+const FACILITY_STATUSES = ["GOOD", "DAMAGED", "REPAIRING"] as const;
 
 export async function GET(request: Request) {
     try {
         const user = await requireAuth();
         if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "SHELTER", user.campId))) {
-            return NextResponse.json({ success: false, message: "Tidak memiliki akses ke divisi shelter posko ini." }, { status: 403 });
+            return fail("Tidak memiliki akses ke divisi shelter posko ini.", 403);
         }
 
         const url = new URL(request.url);
@@ -20,12 +24,13 @@ export async function GET(request: Request) {
         const skip = (params.page! - 1) * params.limit!;
         const q = url.searchParams.get("q")?.trim();
         const status = url.searchParams.get("status")?.trim().toUpperCase();
+        const category = parseFacilityCategory(url.searchParams.get("category"));
 
-        const baseWhere = user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! };
         const where: Prisma.FacilityReportWhereInput = {
-            ...baseWhere,
+            ...(user.role === "SUPER_ADMIN" ? {} : { campId: user.campId! }),
             ...(q ? { facilityName: { contains: q, mode: "insensitive" } } : {}),
-            ...(status && ["GOOD", "DAMAGED", "REPAIRING"].includes(status) ? { status: status as "GOOD" | "DAMAGED" | "REPAIRING" } : {}),
+            ...(status && (FACILITY_STATUSES as readonly string[]).includes(status) ? { status: status as (typeof FACILITY_STATUSES)[number] } : {}),
+            ...(category ? { category } : {}),
         };
 
         const [reports, total] = await Promise.all([
@@ -33,72 +38,55 @@ export async function GET(request: Request) {
                 where,
                 skip,
                 take: params.limit,
-                orderBy: { updatedAt: "desc" },
-                include: {
-                    camp: {
-                        select: {
-                            id: true,
-                            name: true,
-                        },
-                    },
-                },
+                orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+                include: { camp: { select: { id: true, name: true } } },
             }),
             prisma.facilityReport.count({ where }),
         ]);
 
         return paginatedResponse(reports, total, params);
     } catch (error) {
-        if (isAuthError(error)) return authError(error);
-        console.error("GET_SHELTER_ERROR", error);
-        return NextResponse.json({ success: false, message: "Gagal mengambil data shelter." }, { status: 500 });
+        return handleRouteError(error, { context: "GET_SHELTER_ERROR", fallback: "Gagal mengambil data shelter." });
     }
 }
 
 export async function POST(request: Request) {
     try {
         const user = await requireAuth();
-
-        if (
-            user.role !== "SUPER_ADMIN" &&
-            (!user.campId || !canManageDivision(user, "SHELTER", user.campId))
-        ) {
-            return NextResponse.json({ success: false, message: "Tidak memiliki akses shelter." }, { status: 403 });
+        if (user.role !== "SUPER_ADMIN" && (!user.campId || !canManageDivision(user, "SHELTER", user.campId))) {
+            return fail("Tidak memiliki akses shelter.", 403);
         }
 
         const body = await readJson(request);
+        const campId = user.role === "SUPER_ADMIN" ? (typeof body.campId === "string" ? body.campId : "") : (user.campId ?? "");
+        if (!campId) return fail("Posko wajib dipilih.", 400);
 
-        const campId =
-            user.role === "SUPER_ADMIN"
-                ? (typeof body.campId === "string" ? body.campId : "")
-                : (user.campId ?? "");
+        const category = parseFacilityCategory(body.category);
+        if (!category) return fail("Kategori fasilitas wajib dipilih.", 400);
 
-        if (!campId) {
-            return NextResponse.json({ success: false, message: "Posko wajib dipilih." }, { status: 400 });
-        }
+        const quantity = body.quantity === undefined || body.quantity === "" ? 1 : parseFacilityQuantity(body.quantity);
+        if (quantity === null) return fail("Jumlah fasilitas harus bilangan bulat lebih dari 0.", 400);
 
         const nameError = validateText(body.facilityName, "Nama fasilitas", MAX_NAME_LENGTH);
-        if (nameError) return NextResponse.json({ success: false, message: nameError }, { status: 400 });
+        if (nameError) return fail(nameError, 400);
 
         const descError = validateText(body.description, "Deskripsi fasilitas", MAX_NOTE_LENGTH);
-        if (descError) return NextResponse.json({ success: false, message: descError }, { status: 400 });
+        if (descError) return fail(descError, 400);
 
-        await assertCampActive(campId);
-
-        const status = String(body.status ?? "GOOD").toUpperCase();
         // Laporan baru hanya boleh dimulai dari GOOD (fasilitas ada) atau DAMAGED (kerusakan baru ditemukan).
         // REPAIRING harus melewati tindakan Mulai Perbaikan dengan catatan petugas.
-        if (!["GOOD", "DAMAGED"].includes(status)) {
-            return NextResponse.json(
-                { success: false, message: "Status awal fasilitas hanya boleh Baik atau Rusak." },
-                { status: 400 },
-            );
-        }
+        const status = String(body.status ?? "GOOD").toUpperCase();
+        if (status !== "GOOD" && status !== "DAMAGED") return fail("Status awal fasilitas hanya boleh Baik atau Rusak.", 400);
+
+        await assertCampActive(campId);
 
         const report = await prisma.facilityReport.create({
             data: {
                 campId,
+                category,
+                quantity,
                 facilityName: String(body.facilityName).trim(),
-                status: status as "GOOD" | "DAMAGED",
+                status,
                 description: String(body.description).trim(),
             },
         });
@@ -108,24 +96,11 @@ export async function POST(request: Request) {
             action: "CREATE",
             entity: "FacilityReport",
             entityId: report.id,
-            details: { campId, facilityName: report.facilityName, status: report.status },
+            details: { campId, category, quantity, facilityName: report.facilityName, status: report.status },
         });
 
-        return NextResponse.json(
-            {
-                success: true,
-                message: "Laporan shelter berhasil dibuat.",
-                data: report,
-            },
-            { status: 201 },
-        );
+        return ok(report, "Laporan shelter berhasil dibuat.", 201);
     } catch (error) {
-        if (isInvalidJson(error)) return invalidJsonResponse();
-        if (isAuthError(error)) return authError(error);
-        const knownCampError = campError(error);
-        if (knownCampError) return NextResponse.json({ success: false, message: knownCampError.message }, { status: knownCampError.status });
-
-        console.error("CREATE_SHELTER_ERROR", error);
-        return NextResponse.json({ success: false, message: "Gagal membuat laporan shelter." }, { status: 500 });
+        return handleRouteError(error, { context: "CREATE_SHELTER_ERROR", fallback: "Gagal membuat laporan shelter." });
     }
 }

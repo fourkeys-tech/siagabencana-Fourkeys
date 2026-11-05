@@ -89,6 +89,7 @@ describe("buildReportCsv", () => {
 			occupancyPercentage: 70,
 			criticalLogistics: 1,
 			damagedFacilities: 0,
+			campsBelowStandard: 1,
 			arrivedEvacueeRecords: 10,
 			arrivedEvacueeFamilies: 35,
 			departedEvacueeRecords: 2,
@@ -109,6 +110,8 @@ describe("buildReportCsv", () => {
 				occupancyPercentage: 66.67,
 				problemLogistics: 1,
 				damagedFacilities: 0,
+				facilitySufficiency: "SHORT",
+				facilitySummary: "Di bawah standar (Toilet / MCK kurang 2 bilik)",
 			},
 		],
 		evacuees: [
@@ -159,11 +162,17 @@ describe("buildReportCsv", () => {
 		facilities: [
 			{
 				id: "f1",
+				category: "HEALTH",
+				categoryLabel: "Pos kesehatan",
 				facilityName: "Tenda Medis",
+				quantity: 1,
+				quantityFormatted: "1 unit",
 				status: "GOOD",
 				description: "Kondisi baik dan beroperasi",
 				createdAt: "2026-11-01T08:00:00.000Z",
 				createdAtFormatted: "01/11/2026 15.00 WIB",
+				updatedAt: "2026-11-02T08:00:00.000Z",
+				updatedAtFormatted: "02/11/2026 15.00 WIB",
 				camp: { id: "c1", name: "Posko Merapi, Indah" },
 			},
 		],
@@ -203,7 +212,10 @@ describe("buildReportCsv", () => {
 		expect(csv).toContain("=== RINGKASAN MUTASI STOK LOGISTIK (DALAM PERIODE) ===");
 		expect(csv).toContain("=== STOK LOGISTIK SAAT INI (SNAPSHOT) ===");
 		expect(csv).toContain("=== DISTRIBUSI LOGISTIK (DALAM PERIODE) ===");
-		expect(csv).toContain("=== LAPORAN FASILITAS POSKO (DALAM PERIODE) ===");
+		expect(csv).toContain("=== LAPORAN FASILITAS POSKO (BERMASALAH & AKTIVITAS PERIODE) ===");
+		expect(csv).toContain("Posko di Bawah Standar Fasilitas,1");
+		expect(csv).toContain("Di bawah standar (Toilet / MCK kurang 2 bilik)");
+		expect(csv).toContain("Pos kesehatan");
 		expect(csv).toContain("=== AKTIVITAS PENGUNGSI (DALAM PERIODE) ===");
 	});
 });

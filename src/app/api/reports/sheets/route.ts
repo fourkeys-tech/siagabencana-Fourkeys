@@ -57,6 +57,7 @@ export async function POST(request: Request) {
 			["Tingkat Okupansi (%)", `${report.summary.occupancyPercentage}%`, "Snapshot Saat Ini"],
 			["Logistik Bermasalah (Jenis)", report.summary.criticalLogistics, "Snapshot Saat Ini"],
 			["Fasilitas Bermasalah", report.summary.damagedFacilities, "Snapshot Saat Ini"],
+			["Posko di Bawah Standar Fasilitas", report.summary.campsBelowStandard, "Snapshot Saat Ini"],
 			["Pengungsi Tiba (KK)", report.summary.arrivedEvacueeRecords, "Dalam Periode"],
 			["Pengungsi Tiba (Jiwa)", report.summary.arrivedEvacueeFamilies, "Dalam Periode"],
 			["Pengungsi Keluar (KK)", report.summary.departedEvacueeRecords, "Dalam Periode"],
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
 			["Total Transaksi Mutasi Stok", report.summary.totalMovementsCount, "Dalam Periode"],
 			[],
 			["STATUS POSKO"],
-			["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Bermasalah"],
+			["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Bermasalah", "Kecukupan Fasilitas"],
 			...report.camps.map((camp) => [
 				camp.name,
 				enumLabel(camp.status),
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
 				`${camp.occupancyPercentage}%`,
 				camp.problemLogistics,
 				camp.damagedFacilities,
+				camp.facilitySummary,
 			]),
 			[],
 			["MUTASI STOK LOGISTIK"],
@@ -127,13 +129,16 @@ export async function POST(request: Request) {
 				])),
 			[],
 			["FASILITAS POSKO"],
-			["Waktu Laporan (WIB)", "Posko", "Fasilitas", "Status", "Keterangan"],
+			["Dilaporkan (WIB)", "Diperbarui (WIB)", "Posko", "Kategori", "Fasilitas", "Jumlah", "Status", "Keterangan"],
 			...(report.facilities.length === 0
-				? [["(Tidak ada laporan fasilitas dalam periode ini)"]]
+				? [["(Tidak ada fasilitas bermasalah atau aktivitas fasilitas dalam periode ini)"]]
 				: report.facilities.map((facility) => [
 					facility.createdAtFormatted,
+					facility.updatedAtFormatted,
 					facility.camp.name,
+					facility.categoryLabel,
 					facility.facilityName,
+					facility.quantityFormatted,
 					enumLabel(facility.status),
 					facility.description,
 				])),
@@ -171,7 +176,7 @@ export async function POST(request: Request) {
 			}
 			if (
 				typeof firstCell === "string" &&
-				["Indikator", "Posko", "Waktu Dibuat (WIB)", "Waktu Laporan (WIB)", "Nama", "Barang"].includes(firstCell)
+				["Indikator", "Posko", "Waktu Dibuat (WIB)", "Dilaporkan (WIB)", "Nama", "Barang"].includes(firstCell)
 			) {
 				headerRows.push(index);
 			}

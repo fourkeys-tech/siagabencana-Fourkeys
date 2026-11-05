@@ -47,6 +47,12 @@ export const DOMAIN_ERRORS = {
 	EVACUEE_NOT_FOUND: { status: 404, message: "Data pengungsi tidak ditemukan." },
 	ALREADY_CHECKED_OUT: { status: 409, message: "Pengungsi sudah check-out." },
 
+	// Fasilitas shelter
+	FACILITY_NOT_FOUND: { status: 404, message: "Laporan fasilitas tidak ditemukan." },
+	INVALID_FACILITY_TRANSITION: { status: 409, message: "Status fasilitas sudah berubah atau tindakan tidak sesuai alur. Muat ulang data lalu coba lagi." },
+	FACILITY_DAMAGE_EXCEEDS_QUANTITY: { status: 400, message: "Jumlah rusak melebihi jumlah fasilitas yang tercatat." },
+	FACILITY_STATUS_REQUIRES_ACTION: { status: 409, message: "Perubahan status harus memakai tindakan perbaikan atau penggantian." },
+
 	// User & penugasan
 	CAMP_MANAGER_EXISTS: { status: 409, message: "Posko tersebut sudah memiliki manager." },
 	DIVISION_HEAD_EXISTS: { status: 409, message: "Divisi tersebut sudah memiliki ketua di posko ini." },

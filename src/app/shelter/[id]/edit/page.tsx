@@ -5,15 +5,21 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
-import { FormField } from "@/components/ui/form-field";
+import { FormField, FormSelect } from "@/components/ui/form-field";
+import { enumLabel } from "@/lib/labels";
+import { FACILITY_CATEGORIES, FACILITY_CATEGORY_INFO, type FacilityCategory } from "@/lib/shelter-standards";
 
 interface FacilityReport {
 	id: string;
 	campId: string;
+	category: FacilityCategory;
 	facilityName: string;
+	quantity: number;
 	status: "GOOD" | "DAMAGED" | "REPAIRING";
 	description: string;
 }
+
+const categoryOptions = FACILITY_CATEGORIES.map((category) => ({ value: category, label: FACILITY_CATEGORY_INFO[category].label }));
 
 export default function ShelterEditPage() {
 	const params = useParams();
@@ -22,7 +28,9 @@ export default function ShelterEditPage() {
 
 	const [report, setReport] = useState<FacilityReport | null>(null);
 	const [formData, setFormData] = useState({
+		category: "OTHER" as FacilityCategory,
 		facilityName: "",
+		quantity: "1",
 		description: "",
 	});
 	const [loading, setLoading] = useState(true);
@@ -38,7 +46,9 @@ export default function ShelterEditPage() {
 				if (data.success) {
 					setReport(data.data);
 					setFormData({
+						category: data.data.category,
 						facilityName: data.data.facilityName,
+						quantity: String(data.data.quantity),
 						description: data.data.description,
 					});
 				} else {
@@ -58,10 +68,7 @@ export default function ShelterEditPage() {
 			const response = await fetch(`/api/shelter/${id}`, {
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					facilityName: formData.facilityName,
-					description: formData.description,
-				}),
+				body: JSON.stringify(formData),
 			});
 			const data = await response.json();
 
@@ -103,6 +110,8 @@ export default function ShelterEditPage() {
 		);
 	}
 
+	const info = FACILITY_CATEGORY_INFO[formData.category];
+
 	return (
 		<div className="w-full max-w-3xl min-w-0 space-y-6">
 			<div>
@@ -117,6 +126,15 @@ export default function ShelterEditPage() {
 			{error && <Alert type="error">{error}</Alert>}
 
 			<form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+				<FormSelect
+					label="Kategori"
+					value={formData.category}
+					onChange={(value) => setFormData((current) => ({ ...current, category: value as FacilityCategory }))}
+					options={categoryOptions}
+					required
+					disabled={submitting}
+				/>
+				<p className="-mt-2 text-xs text-slate-500">Standar: {info.standardLabel}.</p>
 				<FormField
 					label="Nama Fasilitas"
 					value={formData.facilityName}
@@ -124,12 +142,22 @@ export default function ShelterEditPage() {
 					required
 					disabled={submitting}
 				/>
+				<FormField
+					label={info.quantityLabel}
+					type="number"
+					min={1}
+					step={1}
+					value={formData.quantity}
+					onChange={(value) => setFormData((current) => ({ ...current, quantity: value }))}
+					required
+					disabled={submitting}
+				/>
 				<div className="space-y-1.5">
 					<p className="block text-xs font-bold uppercase tracking-wide text-slate-600">Status saat ini</p>
 					<div className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm font-medium text-slate-700">
-						{report.status}
+						{enumLabel(report.status)}
 					</div>
-					<p className="text-xs text-slate-500">Gunakan menu aksi pada daftar shelter untuk memulai atau menyelesaikan perbaikan.</p>
+					<p className="text-xs text-slate-500">Gunakan menu aksi pada daftar shelter untuk melapor rusak, memulai, atau menyelesaikan perbaikan.</p>
 				</div>
 				<FormField
 					label="Deskripsi"

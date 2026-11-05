@@ -8,6 +8,7 @@ import {
     PROBLEM_FACILITY_STATUSES,
     PROBLEM_LOGISTICS_STATUSES,
 } from "@/lib/status-groups";
+import { assessFacilities, describeShortfall } from "@/lib/shelter-standards";
 
 type Warning = {
     type: "OCCUPANCY" | "LOGISTICS" | "FACILITY";
@@ -38,7 +39,7 @@ export async function GET() {
                     select: { status: true },
                 },
                 facilities: {
-                    select: { status: true },
+                    select: { status: true, category: true, quantity: true },
                 },
                 _count: {
                     select: {
@@ -69,6 +70,8 @@ export async function GET() {
             const damagedFacilities = camp.facilities.filter((facility) =>
                 DAMAGED_FACILITY_STATUSES.includes(facility.status),
             ).length;
+
+            const assessment = assessFacilities(camp.currentOccupants, camp.facilities);
 
             const occupancyPercentage =
                 camp.maxCapacity > 0
@@ -111,6 +114,17 @@ export async function GET() {
                         count: damagedFacilities,
                     });
                 }
+
+                const shortfalls = assessment.categories.filter((item) => item.status === "SHORT");
+                if (shortfalls.length > 0) {
+                    facilityWarnings.push({
+                        type: "FACILITY",
+                        campId: camp.id,
+                        campName: camp.name,
+                        message: `${camp.name} di bawah standar: ${shortfalls.map(describeShortfall).join("; ")}`,
+                        count: shortfalls.length,
+                    });
+                }
             }
 
             return {
@@ -133,6 +147,7 @@ export async function GET() {
                 criticalLogistics,
                 problemFacilities: problemFacilities.length,
                 damagedFacilities,
+                facilitySufficiency: assessment.overall,
             };
         });
 

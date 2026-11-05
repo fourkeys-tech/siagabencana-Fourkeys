@@ -77,7 +77,19 @@ export function directionsUrl(camp: Coordinates) {
 	return `https://www.google.com/maps/dir/?api=1&destination=${camp.latitude},${camp.longitude}`;
 }
 
-export function facilityKind(name: string): FacilityKind {
+const CATEGORY_KINDS: Record<string, FacilityKind> = {
+	HOUSING: "SHELTER",
+	TOILET: "TOILET",
+	WATER: "WATER",
+	POWER: "POWER",
+	KITCHEN: "KITCHEN",
+	HEALTH: "HEALTH",
+};
+
+/** Kategori fasilitas (bila ada & bukan OTHER) menang; selain itu tebak dari nama. */
+export function facilityKind(name: string, category?: string | null): FacilityKind {
+	const fromCategory = category ? CATEGORY_KINDS[category] : undefined;
+	if (fromCategory) return fromCategory;
 	const lower = name.toLowerCase();
 	return FACILITY_KEYWORDS.find(([, keywords]) => keywords.some((keyword) => lower.includes(keyword)))?.[0] ?? "OTHER";
 }

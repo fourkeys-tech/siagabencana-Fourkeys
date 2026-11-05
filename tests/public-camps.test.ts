@@ -81,6 +81,13 @@ describe("facilityKind", () => {
 		expect(facilityKind("Pos Kesehatan")).toBe("HEALTH");
 		expect(facilityKind("Gudang")).toBe("OTHER");
 	});
+
+	it("prefers the stored category and falls back to the name for OTHER", () => {
+		expect(facilityKind("Blok A", "TOILET")).toBe("TOILET");
+		expect(facilityKind("Tenda peleton", "HOUSING")).toBe("SHELTER");
+		expect(facilityKind("Genset", "OTHER")).toBe("POWER");
+		expect(facilityKind("Gudang", "OTHER")).toBe("OTHER");
+	});
 });
 
 describe("matchesFilter", () => {

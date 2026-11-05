@@ -32,7 +32,7 @@ export async function GET(_request: Request, { params }: Params) {
 				status: true,
 				updatedAt: true,
 				logistics: { select: { id: true, itemName: true, status: true, updatedAt: true } },
-				facilities: { select: { id: true, facilityName: true, status: true, updatedAt: true } },
+				facilities: { select: { id: true, category: true, facilityName: true, status: true, updatedAt: true } },
 			},
 		});
 
@@ -52,7 +52,7 @@ export async function GET(_request: Request, { params }: Params) {
 					availability: availabilityFor(occupancyPercentage),
 					lastUpdatedAt,
 					logistics: camp.logistics.map((item) => ({ id: item.id, itemName: item.itemName, status: item.status })),
-					facilities: camp.facilities.map((facility) => ({ id: facility.id, facilityName: facility.facilityName, status: facility.status })),
+					facilities: camp.facilities.map((facility) => ({ id: facility.id, category: facility.category, facilityName: facility.facilityName, status: facility.status })),
 				},
 			},
 			{ headers: { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120" } },

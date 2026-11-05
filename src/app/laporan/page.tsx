@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Table, TableCell, TableRow } from "@/components/ui/table";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import type { ReportResult, StockMovementSummaryRow } from "@/lib/reports";
+import type { OverallSufficiency } from "@/lib/shelter-standards";
+
+const sufficiencyTextClass: Record<OverallSufficiency, string> = {
+	SUFFICIENT: "font-semibold text-emerald-700",
+	SHORT: "font-semibold text-rose-600",
+	INCOMPLETE: "text-amber-700",
+};
 
 type ReportApiResponse = ReportResult & {
 	/** null bila role tidak dapat ekspor ke Google Sheets. */
@@ -307,6 +314,12 @@ export default function ReportsPage() {
 								<CardValue className={data.summary.damagedFacilities > 0 ? "text-amber-600" : ""}>
 									{data.summary.damagedFacilities}
 								</CardValue>
+								<p className="mt-1 text-[11px] text-slate-500">
+									<span className={data.summary.campsBelowStandard > 0 ? "font-semibold text-rose-600" : ""}>
+										{data.summary.campsBelowStandard}
+									</span>{" "}
+									posko di bawah standar
+								</p>
 							</Card>
 						</div>
 					</section>
@@ -369,7 +382,8 @@ export default function ReportsPage() {
 						</div>
 						<Table
 							label="Tabel status posko"
-							headers={["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Rusak"]}
+							minWidth="min-w-[60rem]"
+							headers={["Posko", "Status", "Kapasitas", "Penghuni", "Okupansi", "Logistik Bermasalah", "Fasilitas Rusak", "Kecukupan Fasilitas"]}
 						>
 							{data.camps.map((camp) => (
 								<TableRow key={camp.id}>
@@ -383,6 +397,9 @@ export default function ReportsPage() {
 									</TableCell>
 									<TableCell className={camp.damagedFacilities > 0 ? "font-bold text-amber-600" : ""}>
 										{camp.damagedFacilities}
+									</TableCell>
+									<TableCell className={`max-w-xs text-xs ${sufficiencyTextClass[camp.facilitySufficiency]}`}>
+										{camp.facilitySummary}
 									</TableCell>
 								</TableRow>
 							))}
@@ -508,26 +525,35 @@ export default function ReportsPage() {
 						)}
 					</section>
 
-					{/* Tabel 5: Fasilitas Posko (Periode) */}
+					{/* Tabel 5: Fasilitas Posko (bermasalah saat ini + aktivitas periode) */}
 					<section className="space-y-3 print:break-inside-avoid">
 						<div className="flex items-center justify-between">
-							<h3 className="text-base font-bold text-slate-900">5. Laporan Kondisi Fasilitas</h3>
+							<div>
+								<h3 className="text-base font-bold text-slate-900">5. Laporan Kondisi Fasilitas</h3>
+								<p className="text-xs text-slate-500">
+									Fasilitas yang masih rusak/diperbaiki (meski dilaporkan sebelum periode), ditambah fasilitas yang dicatat atau diperbarui dalam periode.
+								</p>
+							</div>
 							<span className="text-xs text-slate-500">{data.facilities.length} laporan</span>
 						</div>
 						{data.facilities.length === 0 ? (
 							<div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500">
-								Tidak ada laporan fasilitas dalam periode ini.
+								Tidak ada fasilitas bermasalah atau aktivitas fasilitas dalam periode ini.
 							</div>
 						) : (
 							<Table
 								label="Tabel fasilitas posko"
-								headers={["Waktu Lapor", "Posko", "Nama Fasilitas", "Status", "Keterangan"]}
+								minWidth="min-w-[60rem]"
+								headers={["Dilaporkan", "Diperbarui", "Posko", "Kategori", "Nama Fasilitas", "Jumlah", "Status", "Keterangan"]}
 							>
 								{data.facilities.map((facility) => (
 									<TableRow key={facility.id}>
 										<TableCell className="text-xs text-slate-600">{facility.createdAtFormatted}</TableCell>
+										<TableCell className="text-xs text-slate-600">{facility.updatedAtFormatted}</TableCell>
 										<TableCell>{facility.camp.name}</TableCell>
+										<TableCell className="text-slate-700">{facility.categoryLabel}</TableCell>
 										<TableCell className="font-semibold text-slate-950">{facility.facilityName}</TableCell>
+										<TableCell className="whitespace-nowrap">{facility.quantityFormatted}</TableCell>
 										<TableCell><Badge label={facility.status} /></TableCell>
 										<TableCell className="max-w-md truncate text-slate-600">{facility.description}</TableCell>
 									</TableRow>

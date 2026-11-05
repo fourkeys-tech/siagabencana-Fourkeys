@@ -37,6 +37,17 @@ enum FacilityStatus {
   REPAIRING
 }
 
+/// Kategori baku fasilitas posko; patokan kecukupan per kategori ada di src/lib/shelter-standards.ts.
+enum FacilityCategory {
+  HOUSING
+  TOILET
+  WATER
+  POWER
+  KITCHEN
+  HEALTH
+  OTHER
+}
+
 enum DistributionStatus {
   PENDING
   APPROVED
@@ -300,8 +311,11 @@ model FacilityReport {
   campId String
   camp   Camp   @relation(fields: [campId], references: [id], onDelete: Cascade)
 
+  category     FacilityCategory @default(OTHER)
   facilityName String
-  status       FacilityStatus @default(GOOD)
+  /// Jumlah dalam satuan kategori: HOUSING = m², WATER = liter/hari, lainnya = unit. CHECK > 0 (raw SQL).
+  quantity     Int              @default(1)
+  status       FacilityStatus   @default(GOOD)
   description  String
 
   createdAt DateTime @default(now())
@@ -310,6 +324,7 @@ model FacilityReport {
   @@index([campId])
   @@index([campId, status])
   @@index([campId, updatedAt])
+  @@index([campId, category])
 }
 
 model EvacueeRecord {

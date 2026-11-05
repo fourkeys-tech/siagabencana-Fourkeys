@@ -92,7 +92,9 @@ type EvacueeSeed = {
 type FacilitySeed = {
 	id: string;
 	campId: string;
+	category: "HOUSING" | "TOILET" | "WATER" | "POWER" | "KITCHEN" | "HEALTH" | "OTHER";
 	facilityName: string;
+	quantity: number;
 	status: FacilityStatusValue;
 	description: string;
 	createdAt: Date;
@@ -478,11 +480,11 @@ const evacuees: EvacueeSeed[] = [
 ];
 
 const facilities: FacilitySeed[] = camps.flatMap((camp) => [
-	{ id: `seed-facility-${camp.key}-toilet`, campId: camp.id, facilityName: "Toilet", status: camp.key === "taman" ? "REPAIRING" : "GOOD", description: camp.key === "taman" ? "Dua bilik toilet perlu perbaikan saluran air." : "Toilet berfungsi dan dibersihkan tiga kali sehari.", createdAt: dateDaysAgo(14) },
-	{ id: `seed-facility-${camp.key}-water`, campId: camp.id, facilityName: "Penyediaan Air", status: camp.key === "gor-sidoarjo" ? "DAMAGED" : "GOOD", description: camp.key === "gor-sidoarjo" ? "Pompa utama mengalami gangguan dan membutuhkan suku cadang." : "Tandon air dan jalur distribusi masih berfungsi normal.", createdAt: dateDaysAgo(12) },
-	{ id: `seed-facility-${camp.key}-electricity`, campId: camp.id, facilityName: "Listrik", status: camp.key === "waru" ? "REPAIRING" : "GOOD", description: camp.key === "waru" ? "Panel cadangan sedang diperbaiki oleh teknisi." : "Penerangan utama tersedia sepanjang waktu.", createdAt: dateDaysAgo(10) },
-	{ id: `seed-facility-${camp.key}-tent`, campId: camp.id, facilityName: "Tenda Pengungsian", status: camp.key === "candi" || camp.key === "gedangan" ? "DAMAGED" : "GOOD", description: camp.key === "candi" || camp.key === "gedangan" ? "Sebagian tenda mengalami kebocoran pada sambungan atas." : "Tenda utama kokoh dan memiliki jalur evakuasi yang jelas.", createdAt: dateDaysAgo(8) },
-	{ id: `seed-facility-${camp.key}-medical`, campId: camp.id, facilityName: "Pos Kesehatan", status: camp.key === "taman" ? "DAMAGED" : "GOOD", description: camp.key === "taman" ? "Atap pos kesehatan perlu diperbaiki sebelum hujan berikutnya." : "Pos kesehatan memiliki meja pemeriksaan dan lemari obat.", createdAt: dateDaysAgo(6) },
+	{ id: `seed-facility-${camp.key}-toilet`, campId: camp.id, category: "TOILET", quantity: 8, facilityName: "Toilet",status: camp.key === "taman" ? "REPAIRING" : "GOOD", description: camp.key === "taman" ? "Dua bilik toilet perlu perbaikan saluran air." : "Toilet berfungsi dan dibersihkan tiga kali sehari.", createdAt: dateDaysAgo(14) },
+	{ id: `seed-facility-${camp.key}-water`, campId: camp.id, category: "WATER", quantity: 3000, facilityName: "Penyediaan Air",status: camp.key === "gor-sidoarjo" ? "DAMAGED" : "GOOD", description: camp.key === "gor-sidoarjo" ? "Pompa utama mengalami gangguan dan membutuhkan suku cadang." : "Tandon air dan jalur distribusi masih berfungsi normal.", createdAt: dateDaysAgo(12) },
+	{ id: `seed-facility-${camp.key}-electricity`, campId: camp.id, category: "POWER", quantity: 1, facilityName: "Listrik",status: camp.key === "waru" ? "REPAIRING" : "GOOD", description: camp.key === "waru" ? "Panel cadangan sedang diperbaiki oleh teknisi." : "Penerangan utama tersedia sepanjang waktu.", createdAt: dateDaysAgo(10) },
+	{ id: `seed-facility-${camp.key}-tent`, campId: camp.id, category: "HOUSING", quantity: 600, facilityName: "Tenda Pengungsian",status: camp.key === "candi" || camp.key === "gedangan" ? "DAMAGED" : "GOOD", description: camp.key === "candi" || camp.key === "gedangan" ? "Sebagian tenda mengalami kebocoran pada sambungan atas." : "Tenda utama kokoh dan memiliki jalur evakuasi yang jelas.", createdAt: dateDaysAgo(8) },
+	{ id: `seed-facility-${camp.key}-medical`, campId: camp.id, category: "HEALTH", quantity: 1, facilityName: "Pos Kesehatan",status: camp.key === "taman" ? "DAMAGED" : "GOOD", description: camp.key === "taman" ? "Atap pos kesehatan perlu diperbaiki sebelum hujan berikutnya." : "Pos kesehatan memiliki meja pemeriksaan dan lemari obat.", createdAt: dateDaysAgo(6) },
 ]);
 
 const userData = createUsers();
@@ -674,8 +676,8 @@ async function upsertLogisticsItem(item: LogisticsSeed) {
 async function upsertFacility(facility: FacilitySeed) {
 	return prisma.facilityReport.upsert({
 		where: { id: facility.id },
-		update: { campId: facility.campId, facilityName: facility.facilityName, status: facility.status, description: facility.description, createdAt: facility.createdAt },
-		create: { id: facility.id, campId: facility.campId, facilityName: facility.facilityName, status: facility.status, description: facility.description, createdAt: facility.createdAt },
+		update: { campId: facility.campId, category: facility.category, facilityName: facility.facilityName, quantity: facility.quantity, status: facility.status, description: facility.description, createdAt: facility.createdAt },
+		create: { id: facility.id, campId: facility.campId, category: facility.category, facilityName: facility.facilityName, quantity: facility.quantity, status: facility.status, description: facility.description, createdAt: facility.createdAt },
 	});
 }
 

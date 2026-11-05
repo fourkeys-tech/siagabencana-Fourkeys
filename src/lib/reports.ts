@@ -1,5 +1,12 @@
 import { PROBLEM_FACILITY_STATUSES, PROBLEM_LOGISTICS_STATUSES } from "@/lib/status-groups";
 import { occupancyPercentage } from "@/lib/dashboard";
+import {
+	assessFacilities,
+	FACILITY_CATEGORY_INFO,
+	formatFacilityQuantity,
+	sufficiencySummary,
+	type OverallSufficiency,
+} from "@/lib/shelter-standards";
 import type { PrismaClient } from "@prisma/client";
 
 export const WIB_TIMEZONE = "Asia/Jakarta";
@@ -113,6 +120,8 @@ export type ReportResult = {
 		occupancyPercentage: number;
 		criticalLogistics: number;
 		damagedFacilities: number;
+		/** Posko aktif yang minimal satu kategori fasilitasnya di bawah standar. */
+		campsBelowStandard: number;
 		// Dalam periode
 		arrivedEvacueeRecords: number;
 		arrivedEvacueeFamilies: number;
@@ -133,6 +142,8 @@ export type ReportResult = {
 		occupancyPercentage: number;
 		problemLogistics: number;
 		damagedFacilities: number;
+		facilitySufficiency: OverallSufficiency;
+		facilitySummary: string;
 	}>;
 	evacuees: Array<{
 		id: string;
@@ -157,13 +168,20 @@ export type ReportResult = {
 		camp: { id: string; name: string };
 	}>;
 	stockMovements: StockMovementSummaryRow[];
+	/** Fasilitas yang masih bermasalah saat ini, ditambah yang dibuat/diperbarui dalam periode. */
 	facilities: Array<{
 		id: string;
+		category: string;
+		categoryLabel: string;
 		facilityName: string;
+		quantity: number;
+		quantityFormatted: string;
 		status: string;
 		description: string;
 		createdAt: string;
 		createdAtFormatted: string;
+		updatedAt: string;
+		updatedAtFormatted: string;
 		camp: { id: string; name: string };
 	}>;
 	distributions: Array<{
@@ -252,20 +270,21 @@ export async function buildReportData(options: BuildReportOptions): Promise<Repo
 			},
 			orderBy: [{ camp: { name: "asc" } }, { itemName: "asc" }],
 		}),
+		// Seluruh fasilitas posko (snapshot) untuk hitungan kecukupan; daftar laporan difilter setelahnya.
 		prisma.facilityReport.findMany({
-			where: {
-				campId: { in: campIds },
-				...(periodFilter ? { createdAt: periodFilter } : {}),
-			},
+			where: { campId: { in: campIds } },
 			select: {
 				id: true,
+				category: true,
 				facilityName: true,
+				quantity: true,
 				status: true,
 				description: true,
 				createdAt: true,
+				updatedAt: true,
 				camp: { select: { id: true, name: true } },
 			},
-			orderBy: { createdAt: "desc" },
+			orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
 		}),
 		prisma.distribution.findMany({
 			where: {
@@ -348,11 +367,14 @@ export async function buildReportData(options: BuildReportOptions): Promise<Repo
 	const campRows = camps.map((camp) => {
 		const campLogistics = logisticsByCamp.get(camp.id) ?? [];
 		const campFacilities = facilitiesByCamp.get(camp.id) ?? [];
+		const assessment = assessFacilities(camp.currentOccupants, campFacilities);
 		return {
 			...camp,
 			occupancyPercentage: occupancyPercentage(camp.currentOccupants, camp.maxCapacity),
 			problemLogistics: campLogistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
 			damagedFacilities: campFacilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
+			facilitySufficiency: assessment.overall,
+			facilitySummary: sufficiencySummary(assessment),
 		};
 	});
 
@@ -363,6 +385,14 @@ export async function buildReportData(options: BuildReportOptions): Promise<Repo
 		if (to && date > to) return false;
 		return true;
 	};
+
+	// Fasilitas rusak yang dilaporkan sebelum periode tetap tampil selama belum selesai ditangani.
+	const reportedFacilities = periodFilter
+		? facilities.filter(
+			(facility) =>
+				PROBLEM_FACILITY_STATUSES.includes(facility.status) || isWithinPeriod(facility.createdAt) || isWithinPeriod(facility.updatedAt),
+		)
+		: facilities;
 
 	const arrivedRecords = evacuees.filter((record) => isWithinPeriod(record.arrivedAt));
 	const departedRecords = evacuees.filter((record) => record.departedAt && isWithinPeriod(record.departedAt));
@@ -458,6 +488,7 @@ export async function buildReportData(options: BuildReportOptions): Promise<Repo
 			occupancyPercentage: occupancyPercentage(totalOccupants, totalCapacity),
 			criticalLogistics: logistics.filter((item) => PROBLEM_LOGISTICS_STATUSES.includes(item.status)).length,
 			damagedFacilities: facilities.filter((facility) => PROBLEM_FACILITY_STATUSES.includes(facility.status)).length,
+			campsBelowStandard: campRows.filter((camp) => camp.status === "ACTIVE" && camp.facilitySufficiency === "SHORT").length,
 			arrivedEvacueeRecords: arrivedRecords.length,
 			arrivedEvacueeFamilies: arrivedRecords.reduce((sum, r) => sum + r.totalFamily, 0),
 			departedEvacueeRecords: departedRecords.length,
@@ -482,15 +513,24 @@ export async function buildReportData(options: BuildReportOptions): Promise<Repo
 			camp: item.camp,
 		})),
 		stockMovements,
-		facilities: facilities.map((facility) => ({
-			id: facility.id,
-			facilityName: facility.facilityName,
-			status: facility.status,
-			description: facility.description,
-			createdAt: facility.createdAt.toISOString(),
-			createdAtFormatted: formatDateTimeWIB(facility.createdAt),
-			camp: facility.camp,
-		})),
+		facilities: reportedFacilities.map((facility) => {
+			const info = FACILITY_CATEGORY_INFO[facility.category];
+			return {
+				id: facility.id,
+				category: facility.category,
+				categoryLabel: info.label,
+				facilityName: facility.facilityName,
+				quantity: facility.quantity,
+				quantityFormatted: formatFacilityQuantity(facility.quantity, info.unit),
+				status: facility.status,
+				description: facility.description,
+				createdAt: facility.createdAt.toISOString(),
+				createdAtFormatted: formatDateTimeWIB(facility.createdAt),
+				updatedAt: facility.updatedAt.toISOString(),
+				updatedAtFormatted: formatDateTimeWIB(facility.updatedAt),
+				camp: facility.camp,
+			};
+		}),
 		distributions: distributions.map((distribution) => ({
 			id: distribution.id,
 			itemName: distribution.itemName,
@@ -544,6 +584,7 @@ export function buildReportCsv(report: ReportResult): string {
 	lines.push(toCsvRow(["Tingkat Okupansi (%)", `${report.summary.occupancyPercentage}%`, "Snapshot Saat Ini"]));
 	lines.push(toCsvRow(["Logistik Bermasalah (Jenis)", report.summary.criticalLogistics, "Snapshot Saat Ini"]));
 	lines.push(toCsvRow(["Fasilitas Bermasalah", report.summary.damagedFacilities, "Snapshot Saat Ini"]));
+	lines.push(toCsvRow(["Posko di Bawah Standar Fasilitas", report.summary.campsBelowStandard, "Snapshot Saat Ini"]));
 	lines.push(toCsvRow(["Pengungsi Tiba (KK)", report.summary.arrivedEvacueeRecords, "Dalam Periode"]));
 	lines.push(toCsvRow(["Pengungsi Tiba (Jiwa)", report.summary.arrivedEvacueeFamilies, "Dalam Periode"]));
 	lines.push(toCsvRow(["Pengungsi Keluar (KK)", report.summary.departedEvacueeRecords, "Dalam Periode"]));
@@ -556,7 +597,7 @@ export function buildReportCsv(report: ReportResult): string {
 
 	// 2. Status Posko
 	lines.push(toCsvRow(["=== STATUS POSKO (SNAPSHOT SAAT INI) ==="]));
-	lines.push(toCsvRow(["Posko", "Status", "Kapasitas Maks", "Penghuni Saat Ini", "Okupansi (%)", "Logistik Bermasalah", "Fasilitas Bermasalah"]));
+	lines.push(toCsvRow(["Posko", "Status", "Kapasitas Maks", "Penghuni Saat Ini", "Okupansi (%)", "Logistik Bermasalah", "Fasilitas Bermasalah", "Kecukupan Fasilitas"]));
 	for (const camp of report.camps) {
 		lines.push(toCsvRow([
 			camp.name,
@@ -566,6 +607,7 @@ export function buildReportCsv(report: ReportResult): string {
 			`${camp.occupancyPercentage}%`,
 			camp.problemLogistics,
 			camp.damagedFacilities,
+			camp.facilitySummary,
 		]));
 	}
 	lines.push("");
@@ -635,16 +677,19 @@ export function buildReportCsv(report: ReportResult): string {
 	lines.push("");
 
 	// 6. Fasilitas
-	lines.push(toCsvRow(["=== LAPORAN FASILITAS POSKO (DALAM PERIODE) ==="]));
-	lines.push(toCsvRow(["Tanggal", "Posko", "Nama Fasilitas", "Status", "Keterangan"]));
+	lines.push(toCsvRow(["=== LAPORAN FASILITAS POSKO (BERMASALAH & AKTIVITAS PERIODE) ==="]));
+	lines.push(toCsvRow(["Dilaporkan", "Diperbarui", "Posko", "Kategori", "Nama Fasilitas", "Jumlah", "Status", "Keterangan"]));
 	if (report.facilities.length === 0) {
-		lines.push(toCsvRow(["(Tidak ada laporan fasilitas dalam periode ini)"]));
+		lines.push(toCsvRow(["(Tidak ada fasilitas bermasalah atau aktivitas fasilitas dalam periode ini)"]));
 	} else {
 		for (const fac of report.facilities) {
 			lines.push(toCsvRow([
 				fac.createdAtFormatted,
+				fac.updatedAtFormatted,
 				fac.camp.name,
+				fac.categoryLabel,
 				fac.facilityName,
+				fac.quantityFormatted,
 				fac.status,
 				fac.description,
 			]));

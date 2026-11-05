@@ -7,12 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FACILITY_CATEGORY_INFO, formatFacilityQuantity, type FacilityCategory } from "@/lib/shelter-standards";
 
 interface FacilityReport {
 	id: string;
 	campId: string;
 	camp: { name: string };
+	category: FacilityCategory;
 	facilityName: string;
+	quantity: number;
 	status: string;
 	description: string;
 	createdAt: string;
@@ -121,12 +124,23 @@ export default function ShelterDetailPage() {
 					<p className="text-gray-900">{report.facilityName}</p>
 				</div>
 				<div>
+					<p className="text-sm font-medium text-gray-500">Kategori</p>
+					<p className="text-gray-900">
+						{FACILITY_CATEGORY_INFO[report.category].label}
+						<span className="ml-2 text-xs text-slate-500">(standar: {FACILITY_CATEGORY_INFO[report.category].standardLabel})</span>
+					</p>
+				</div>
+				<div>
+					<p className="text-sm font-medium text-gray-500">{FACILITY_CATEGORY_INFO[report.category].quantityLabel}</p>
+					<p className="text-gray-900">{formatFacilityQuantity(report.quantity, FACILITY_CATEGORY_INFO[report.category].unit)}</p>
+				</div>
+				<div>
 					<p className="text-sm font-medium text-gray-500">Status</p>
 					<Badge label={report.status} />
 				</div>
 				<div>
-					<p className="text-sm font-medium text-gray-500">Deskripsi</p>
-					<p className="text-gray-900">{report.description}</p>
+					<p className="text-sm font-medium text-gray-500">Deskripsi & riwayat tindakan</p>
+					<p className="whitespace-pre-line text-gray-900">{report.description}</p>
 				</div>
 				<div>
 					<p className="text-sm font-medium text-gray-500">Posko</p>

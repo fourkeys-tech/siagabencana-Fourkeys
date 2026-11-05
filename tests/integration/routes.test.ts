@@ -196,6 +196,8 @@ describeDb("route Fase B", () => {
 					baseQuantity: 20,
 					baseUnit: "pcs",
 					reason: "Bantuan masuk",
+					// Tanggal tetap di dalam periode supaya test tidak bergantung pada hari dijalankan.
+					createdAt: new Date("2026-11-02T03:00:00Z"),
 				},
 			});
 
@@ -205,7 +207,7 @@ describeDb("route Fase B", () => {
 					campId: camp.id,
 					name: "Siti Rahma",
 					totalFamily: 4,
-					arrivedAt: new Date(),
+					arrivedAt: new Date("2026-11-02T03:00:00Z"),
 				},
 			});
 
