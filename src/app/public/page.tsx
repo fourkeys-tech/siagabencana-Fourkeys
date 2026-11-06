@@ -1149,7 +1149,7 @@ export default function PublicPage({
 											className="min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base font-medium outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 sm:text-sm md:w-auto"
 										>
 											<option value="AVAILABILITY">Tempat tersisa terbanyak</option>
-											<option value="DISTANCE">{userLocation ? "Paling dekat dari saya" : "📍 Paling dekat (izinkan lokasi)"}</option>
+											<option value="DISTANCE">{userLocation ? "Paling dekat dari saya" : "Paling dekat (izinkan lokasi)"}</option>
 											<option value="OCCUPANCY">Okupansi terendah</option>
 											<option value="NAME">Nama posko (A–Z)</option>
 										</select>
